@@ -975,8 +975,11 @@ static void SuspendDevice(void)
 	suspend_status = crypt_suspend(cd, CDEVICE_1);
 	if (suspend_status == -ENOTSUP) {
 		printf("WARNING: Suspend/Resume not supported, skipping test.\n");
-		goto out;
+		OK_(crypt_deactivate(cd, CDEVICE_1));
+		crypt_free(cd);
+		return;
 	}
+
 	OK_(suspend_status);
 	FAIL_(crypt_suspend(cd, CDEVICE_1), "already suspended");
 
@@ -990,10 +993,30 @@ static void SuspendDevice(void)
 	FAIL_(crypt_resume_by_keyfile_offset(cd, CDEVICE_1, CRYPT_ANY_SLOT, KEYFILE1, 1, 0), "wrong key");
 	OK_(crypt_resume_by_keyfile_offset(cd, CDEVICE_1, CRYPT_ANY_SLOT, KEYFILE1, 0, 0));
 	FAIL_(crypt_resume_by_keyfile(cd, CDEVICE_1, CRYPT_ANY_SLOT, KEYFILE1, 0), "not suspended");
-	_remove_keyfiles();
-out:
 	OK_(crypt_deactivate(cd, CDEVICE_1));
 	crypt_free(cd);
+
+	/* create LUKS device with detached header */
+	OK_(crypt_init(&cd, DEVICE_1));
+	OK_(crypt_load(cd, CRYPT_LUKS1, NULL));
+	OK_(crypt_set_data_device(cd, DEVICE_2));
+	OK_(crypt_activate_by_passphrase(cd, CDEVICE_1, CRYPT_ANY_SLOT, KEY1, strlen(KEY1), 0));
+	crypt_free(cd);
+
+	/* Should be able to suspend but not resume if not header specified */
+	OK_(crypt_init_by_name(&cd, CDEVICE_1));
+	OK_(crypt_suspend(cd, CDEVICE_1));
+	FAIL_(crypt_suspend(cd, CDEVICE_1), "already suspended");
+	FAIL_(crypt_resume_by_passphrase(cd, CDEVICE_1, CRYPT_ANY_SLOT, KEY1, strlen(KEY1)-1), "no header");
+	crypt_free(cd);
+
+	OK_(crypt_init_by_name_and_header(&cd, CDEVICE_1, DEVICE_1));
+	OK_(crypt_resume_by_passphrase(cd, CDEVICE_1, CRYPT_ANY_SLOT, KEY1, strlen(KEY1)));
+
+	OK_(crypt_deactivate(cd, CDEVICE_1));
+	crypt_free(cd);
+
+	_remove_keyfiles();
 }
 
 static void AddDeviceLuks(void)
@@ -1785,6 +1808,8 @@ static void VerityTest(void)
 	/* hash fail */
 	root_hash[1] = ~root_hash[1];
 	OK_(crypt_activate_by_volume_key(cd, CDEVICE_1, root_hash, 32, CRYPT_ACTIVATE_READONLY));
+	/* Be sure there was some read activity to mark device corrupted. */
+	_system("blkid " DMDIR CDEVICE_1, 0);
 	OK_(crypt_get_active_device(cd, CDEVICE_1, &cad));
 	EQ_(CRYPT_ACTIVATE_READONLY|CRYPT_ACTIVATE_CORRUPTED, cad.flags);
 	OK_(crypt_deactivate(cd, CDEVICE_1));
@@ -1793,6 +1818,7 @@ static void VerityTest(void)
 	/* data fail */
 	OK_(crypt_set_data_device(cd, DEVICE_1));
 	OK_(crypt_activate_by_volume_key(cd, CDEVICE_1, root_hash, 32, CRYPT_ACTIVATE_READONLY));
+	_system("blkid " DMDIR CDEVICE_1, 0);
 	OK_(crypt_get_active_device(cd, CDEVICE_1, &cad));
 	EQ_(CRYPT_ACTIVATE_READONLY|CRYPT_ACTIVATE_CORRUPTED, cad.flags);
 	OK_(crypt_deactivate(cd, CDEVICE_1));

@@ -37,7 +37,8 @@ Creates a mapping with <name> backed by device <data_device> and using
 
 The <root_hash> is a hexadecimal string.
 
-\fB<options>\fR can be [\-\-hash-offset, \-\-no-superblock]
+\fB<options>\fR can be [\-\-hash-offset, \-\-no-superblock,
+\-\-ignore-corruption or \-\-restart-on-corruption, \-\-ignore-zero-blocks]
 
 If option \-\-no-superblock is used, you have to use as the same options
 as in initial format operation.
@@ -82,7 +83,7 @@ Create or use dm-verity without permanent on-disk superblock.
 .TP
 .B "\-\-format=number"
 Specifies the hash version type.
-Format type 0 is original Chrome OS verion. Format type 1 is current version.
+Format type 0 is original Chrome OS version. Format type 1 is current version.
 .TP
 .B "\-\-data-block-size=bytes"
 Used block size for the data device.
@@ -110,6 +111,24 @@ Use the provided UUID for format command instead of generating new one.
 The UUID must be provided in standard UUID format,
 e.g. 12345678-1234-1234-1234-123456789abc.
 .TP
+.B "\-\-ignore-corruption", "\-\-restart-on-corruption"
+Defines what to do if data integrity problem is detected (data corruption).
+
+Without these options kernel fails the IO operation with I/O error.
+With \-\-ignore-corruption option the corruption is only logged.
+With \-\-restart-on-corruption the kernel is restarted immediatelly.
+(You have to provide way how to avoid restart loops.)
+
+\fBWARNING:\fR Use these options only for very specific cases.
+These options are available since Linux kernel version 4.1.
+.TP
+.B "\-\-ignore-zero-blocks"
+Instruct kernel to not verify blocks that are expected to contain zeroes
+and always directly return zeroes instead.
+
+\fBWARNING:\fR Use this option only in very specific cases.
+This option is available since Linux kernel version 4.5.
+.TP
 .B "\-\-version"
 Show the program version.
 .SH RETURN CODES
@@ -130,14 +149,14 @@ The first implementation of veritysetup was written by Chrome OS authors.
 This version is based on verification code written by Mikulas Patocka <mpatocka@redhat.com>
 and rewritten for libcryptsetup by Milan Broz <gmazyland@gmail.com>.
 .SH COPYRIGHT
-Copyright \(co 2012-2013 Red Hat, Inc.
+Copyright \(co 2012-2016 Red Hat, Inc.
 .br
-Copyright \(co 2012-2014 Milan Broz
+Copyright \(co 2012-2016 Milan Broz
 
 This is free software; see the source for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 .SH SEE ALSO
-The project website at \fBhttp://code.google.com/p/cryptsetup/\fR
+The project website at \fBhttps://gitlab.com/cryptsetup/cryptsetup\fR
 
 The verity on-disk format specification available at
-\fBhttp://code.google.com/p/cryptsetup/wiki/DMVerity\fR
+\fBhttps://gitlab.com/cryptsetup/cryptsetup/wikis/DMVerity\fR

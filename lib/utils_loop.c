@@ -1,8 +1,8 @@
 /*
  * loopback block device utilities
  *
- * Copyright (C) 2011-2012, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2012, Milan Broz
+ * Copyright (C) 2011-2015, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2015, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -28,6 +28,9 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifdef HAVE_SYS_SYSMACROS_H
+# include <sys/sysmacros.h>     /* for major, minor */
+#endif
 #include <linux/loop.h>
 
 #include "utils_loop.h"
@@ -40,6 +43,10 @@
 
 #ifndef LOOP_CTL_GET_FREE
 #define LOOP_CTL_GET_FREE 0x4C82
+#endif
+
+#ifndef LOOP_SET_CAPACITY
+#define LOOP_SET_CAPACITY 0x4C07
 #endif
 
 static char *crypt_loop_get_device_old(void)
@@ -96,6 +103,7 @@ int crypt_loop_attach(const char *loop, const char *file, int offset,
 		      int autoclear, int *readonly)
 {
 	struct loop_info64 lo64 = {0};
+	char *lo_file_name;
 	int loop_fd = -1, file_fd = -1, r = 1;
 
 	file_fd = open(file, (*readonly ? O_RDONLY : O_RDWR) | O_EXCL);
@@ -110,7 +118,9 @@ int crypt_loop_attach(const char *loop, const char *file, int offset,
 	if (loop_fd < 0)
 		goto out;
 
-	strncpy((char*)lo64.lo_file_name, file, LO_NAME_SIZE);
+	lo_file_name = (char*)lo64.lo_file_name;
+	lo_file_name[LO_NAME_SIZE-1] = '\0';
+	strncpy(lo_file_name, file, LO_NAME_SIZE-1);
 	lo64.lo_offset = offset;
 	if (autoclear)
 		lo64.lo_flags |= LO_FLAGS_AUTOCLEAR;
@@ -151,6 +161,21 @@ int crypt_loop_detach(const char *loop)
                 return 1;
 
 	if (!ioctl(loop_fd, LOOP_CLR_FD, 0))
+		r = 0;
+
+	close(loop_fd);
+	return r;
+}
+
+int crypt_loop_resize(const char *loop)
+{
+	int loop_fd = -1, r = 1;
+
+	loop_fd = open(loop, O_RDONLY);
+	if (loop_fd < 0)
+                return 1;
+
+	if (!ioctl(loop_fd, LOOP_SET_CAPACITY, 0))
 		r = 0;
 
 	close(loop_fd);

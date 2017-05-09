@@ -206,6 +206,9 @@ parse_opts () {
 		tcrypthidden)
 			TCRYPTPARAMS="$TCRYPTPARAMS --tcrypt-hidden"
 			;;
+		veracrypt)
+			TCRYPTPARAMS="$TCRYPTPARAMS --veracrypt"
+			;;
 		esac
 
 		CRYPTTAB_OPTIONS="$CRYPTTAB_OPTIONS $PARAM"
@@ -293,14 +296,9 @@ do_luks () {
 		key="-"
 	elif [ -z "$key" ]; then
 		# no keyscript, no key => password
-		keyscriptarg="Unlocking the disk $src ($dst)\nEnter passphrase: "
+		keyscriptarg="$promptmsg"
 		key="-"
-		if [ -x /bin/plymouth ] && plymouth --ping; then
-			KEYSCRIPT="plymouth ask-for-password --prompt"
-			keyscriptarg=$(printf "$keyscriptarg")
-		else
-			KEYSCRIPT="/lib/cryptsetup/askpass"
-		fi
+		KEYSCRIPT="/lib/cryptsetup/askpass"
 	elif [ "$key" != "${key%/dev/*}" ]; then
 		# no keyscript, device key => special treatment
 		keyscriptarg=""
@@ -360,14 +358,9 @@ do_tcrypt () {
 		key="-"
 	elif [ -z "$key" ]; then
 		# no keyscript, no key => password
-		keyscriptarg="Unlocking the disk $src ($dst)\nEnter passphrase: "
+		keyscriptarg="$promptmsg"
 		key="-"
-		if [ -x /bin/plymouth ] && plymouth --ping; then
-			KEYSCRIPT="plymouth ask-for-password --prompt"
-			keyscriptarg=$(printf "$keyscriptarg")
-		else
-			KEYSCRIPT="/lib/cryptsetup/askpass"
-		fi
+		KEYSCRIPT="/lib/cryptsetup/askpass"
 	elif [ "$key" != "${key%/dev/*}" ]; then
 		# no keyscript, device key => special treatment
 		keyscriptarg=""
@@ -431,14 +424,9 @@ do_noluks () {
 		key="-"
 	elif [ -z "$key" ]; then
 		# no keyscript, no key => password
-		keyscriptarg="Unlocking the disk $src ($dst)\nEnter passphrase: "
+		keyscriptarg="$promptmsg"
 		key="-"
-		if [ -x /bin/plymouth ] && plymouth --ping; then
-			KEYSCRIPT="plymouth ask-for-password --prompt"
-			keyscriptarg=$(printf "$keyscriptarg")
-		else
-			KEYSCRIPT="/lib/cryptsetup/askpass"
-		fi
+		KEYSCRIPT="/lib/cryptsetup/askpass"
 	else
 		# no keyscript, key => file input
 		keyscriptarg=""
@@ -589,7 +577,7 @@ handle_crypttab_line_start () {
 	if [ "${src#UUID=}" != "$src" ]; then
 		src="/dev/disk/by-uuid/${src#UUID=}"
 	elif [ "${src#LABEL=}" != "$src" ]; then
-		src="/dev/disk/by-label/${src#LABEL=}"
+		src="/dev/disk/by-label/$(printf '%s' "${src#LABEL=}" | sed 's,/,\\x2f,g')"
 	fi
 
 	# Do the preparatory steps
@@ -628,6 +616,15 @@ handle_crypttab_line_start () {
 		device_msg "$dst" "running"
 		return 0
 	fi
+
+	# Prepare the unlocking prompt
+	if [ "${src#/dev/disk/by-uuid/}" != "$src" ]; then
+		# UUIDs are not very helpful
+		diskname="$dst"
+	else
+		diskname="$src ($dst)"
+	fi
+	promptmsg="Please unlock disk $diskname: "
 
 	# All checks passed, do the real setup
 	log_action_msg "$dst (starting).."
@@ -673,6 +670,8 @@ handle_crypttab_line_stop () {
 		device_msg "$dst" "busy"
 		if [ "$INITSTATE" = "early" ] || [ "$INITSTATE" = "manual" ]; then
 			return 1
+		elif [ "$INITSTATE" = "remaining" ]; then
+			return 2
 		fi
 		return 0
 	fi
@@ -702,7 +701,7 @@ crypttab_start_one_disk () {
 		if [ "xUUID=$ID_FS_UUID" = "x$src" ]; then
 			src="/dev/disk/by-uuid/${src#UUID=}"
 		elif [ "xLABEL=$ID_FS_LABEL_ENC" = "x$src" ]; then
-			src="/dev/disk/by-label/${src#LABEL=}"
+			src="/dev/disk/by-label/$(printf '%s' "${src#LABEL=}" | sed 's,/,\\x2f,g')"
 		elif [ "x$1" != "x$src" ]; then
 			found=
 			for link in $DEVLINKS; do
@@ -726,6 +725,7 @@ crypttab_start_one_disk () {
 	return $ret
 }
 
+# Starts all mappings in crypttab
 do_start () {
 	local dst src key opts result
 
@@ -742,8 +742,9 @@ do_start () {
 		if [ "${dev_match#UUID=}" != "$dev_match" ]; then
 			dev_match="$(readlink -f /dev/disk/by-uuid/${dev_match#UUID=})"
 		elif [ "${dev_match#LABEL=}" != "$dev_match" ]; then
-			dev_match="$(readlink -f /dev/disk/by-label/${dev_match#LABEL=})"
+			dev_match="$(readlink -f "/dev/disk/by-label/$(printf '%s' "${dev_match#LABEL=}" | sed 's,/,\\x2f,g')")"
 		fi
+		# only required for the (ubuntu) upstart init system:
 		# if there's already a udev-triggered job running for this
 		# device, wait for it to finish, then re-process to confirm
 		# that it's started successfully.  In the general case this
@@ -768,8 +769,16 @@ do_stop () {
 	log_action_begin_msg "Stopping $INITSTATE crypto disks"
 
 	egrep -v "^[[:space:]]*(#|$)" "$TABFILE" | while read dst src key opts; do
-		handle_crypttab_line_stop "$dst" "$src" "$key" "$opts" <&3 || log_action_end_msg $?
-	done 3<&1
+		for i in 1 2 4 8 16 32; do
+			handle_crypttab_line_stop "$dst" "$src" "$key" "$opts" <&3 && break || ret=$?
+			if [ $ret -eq 1 ] || [ $ret -eq 2 -a $i -gt 16 ]; then
+				log_action_end_msg $ret
+				break
+			fi
+			log_action_cont_msg "$dst busy..."
+			sleep $i
+		done 3<&1
+	done
 
 	log_action_end_msg 0
 }

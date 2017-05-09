@@ -18,7 +18,8 @@ esac
 
 . /usr/share/initramfs-tools/hook-functions
 
-# Hooks for loading gnupg software and key into the initramfs
+# Hooks for loading gnupg software and symmetrically encrypted key into
+# the initramfs
 
 # Check whether cryptroot hook has installed decrypt_gnupg script
 if [ ! -x ${DESTDIR}/lib/cryptsetup/scripts/decrypt_gnupg ] ; then
@@ -26,22 +27,18 @@ if [ ! -x ${DESTDIR}/lib/cryptsetup/scripts/decrypt_gnupg ] ; then
 fi
 
 # Install cryptroot key files into initramfs
-keys=$(sed 's/^\(.*,\|\)key=//; s/,.*//' ${DESTDIR}/conf/conf.d/cryptroot)
-
-if [ "${keys}" != "none" ]; then
-    if [ -z "${keys}" ]; then
-        echo "$0: Missing key files in ${DESTDIR}/conf/conf.d/cryptroot" >&2
-        cat ${DESTDIR}/conf/conf.d/cryptroot >&2
-        exit 1
-    fi
-    for key in ${keys} ; do
-	echo "WARNING: GnuPG key $key is copied to initramfs" >&2
-        if [ ! -d ${DESTDIR}/$(dirname ${key}) ] ; then
-            mkdir -p ${DESTDIR}/$(dirname ${key})
-        fi
-        cp ${key} ${DESTDIR}/${key}
-    done
-fi
+grep -E '(.*,)?keyscript=([^,]*\/)?decrypt_gnupg(,.*)?$' "${DESTDIR}/conf/conf.d/cryptroot" | \
+sed -r '/(.*,)?key=([^,]*)(,.*)?$/ s//\2/; t n; s/.*//; :n' | \
+while read key; do
+	if [ -z "$key" ]; then
+		echo "$0: Missing key file in ${DESTDIR}/conf/conf.d/cryptroot" >&2
+		cat "${DESTDIR}/conf/conf.d/cryptroot" >&2
+		exit 1
+	fi
+	echo "WARNING: gpg-encrypted key $key is copied to initramfs" >&2
+	mkdir -p "${DESTDIR}/$(dirname ${key})"
+	cp -f "$key" "${DESTDIR}/${key}"
+done
 
 # Install gnupg software
 copy_exec /usr/bin/gpg
