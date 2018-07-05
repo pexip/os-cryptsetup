@@ -162,6 +162,9 @@ int crypt_random_init(struct crypt_device *ctx)
 	if(random_fd == -1)
 		goto fail;
 
+	if (crypt_fips_mode())
+		log_verbose(ctx, _("Running in FIPS mode.\n"));
+
 	random_initialised = 1;
 	return 0;
 fail:
@@ -231,9 +234,11 @@ void crypt_random_exit(void)
 
 int crypt_random_default_key_rng(void)
 {
+	/* coverity[pointless_string_compare] */
 	if (!strcmp(DEFAULT_RNG, RANDOM_DEVICE))
 		return CRYPT_RNG_RANDOM;
 
+	/* coverity[pointless_string_compare] */
 	if (!strcmp(DEFAULT_RNG, URANDOM_DEVICE))
 		return CRYPT_RNG_URANDOM;
 
