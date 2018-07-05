@@ -9,7 +9,7 @@ Standards-Version: 3.9.6
 Homepage: http://code.google.com/p/cryptsetup/
 Vcs-Browser: http://anonscm.debian.org/viewvc/pkg-cryptsetup/cryptsetup/trunk
 Vcs-Svn: svn://anonscm.debian.org/pkg-cryptsetup/cryptsetup/trunk
-XS-Pexip-Upstream: http://ftp.debian.org/debian/ jessie
+XS-Pexip-Upstream: http://ftp.debian.org/debian/ stretch
 
 Package: cryptsetup
 Architecture: linux-any
