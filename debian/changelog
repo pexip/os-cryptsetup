@@ -1,3 +1,9 @@
+cryptsetup (2:1.7.3-4pexip1) pexip; urgency=medium
+
+  * Migrate to Stretch
+
+ -- John-Mark Bell <jmb@pexip.com>  Tue, 10 Jul 2018 00:49:51 +0000
+
 cryptsetup (2:1.7.3-4) unstable; urgency=high
 
   [ Guilhem Moulin ]
