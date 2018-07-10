@@ -57,8 +57,8 @@ struct volume_key {
 	char key[];
 };
 
-struct volume_key *crypt_alloc_volume_key(unsigned keylength, const char *key);
-struct volume_key *crypt_generate_volume_key(struct crypt_device *cd, unsigned keylength);
+struct volume_key *crypt_alloc_volume_key(size_t keylength, const char *key);
+struct volume_key *crypt_generate_volume_key(struct crypt_device *cd, size_t keylength);
 void crypt_free_volume_key(struct volume_key *vk);
 
 /* Device backend */
@@ -75,6 +75,8 @@ int device_block_size(struct device *device);
 int device_read_ahead(struct device *device, uint32_t *read_ahead);
 int device_size(struct device *device, uint64_t *size);
 int device_open(struct device *device, int flags);
+void device_disable_direct_io(struct device *device);
+
 
 enum devcheck { DEV_OK = 0, DEV_EXCL = 1, DEV_SHARED = 2 };
 int device_block_adjust(struct crypt_device *cd,

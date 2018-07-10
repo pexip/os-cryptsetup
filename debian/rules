@@ -2,14 +2,15 @@
 
 include /usr/share/dpkg/architecture.mk
 
-# Uncomment this to turn on verbose mode.
+# Turn on verbose mode.
+export V=1
+
+# Uncomment this to turn on debhelper verbose mode.
 #export DH_VERBOSE=1
 
-DEB_VERSION := $(strip $(shell LC_ALL=C dpkg-parsechangelog          |          \
-                               egrep '^Version:' | head -n1 | cut -f2 -d ' '    ))
-DEB_DATE    := $(strip $(shell LC_ALL=C dpkg-parsechangelog          |          \
-                               egrep '^Date:'    | head -n1 | cut -f2- -d ' ' | \
-                               LC_ALL=C date --file=- +%F                       ))
+DEB_VERSION := $(strip $(shell LC_ALL=C dpkg-parsechangelog --show-field Version))
+DEB_DATE    := $(strip $(shell LC_ALL=C dpkg-parsechangelog --show-field Date | \
+                               LC_ALL=C date -u --file=- +%F                    ))
 
 # These are used for cross-compiling and for saving the configure script
 # from having to guess our platform (since we know it already)
@@ -21,8 +22,12 @@ ifeq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
 else
   confflags += --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE)
 endif
+ifeq ($(origin CC),default)
+  CC := $(DEB_HOST_GNU_TYPE)-gcc
+endif
 
 # Export dpkg build flags
+DEB_BUILD_MAINT_OPTIONS = hardening=+bindnow,+pie
 DEB_CFLAGS_MAINT_APPEND = -Wall
 DPKG_EXPORT_BUILDFLAGS  = 1
 -include /usr/share/dpkg/buildflags.mk
@@ -63,7 +68,8 @@ build-indep: build-stamp
 	xsltproc --nonet --xinclude -o debian/doc/ \
 		/usr/share/xml/docbook/stylesheet/docbook-xsl/manpages/docbook.xsl \
 		debian/doc/manpages.xml
-	pod2man --section=8 --center="Administrative commands" --release="" debian/scripts/luksformat \
+	pod2man --section=8 --center="Administrative commands" \
+		--release="$(DEB_VERSION)" debian/scripts/luksformat \
 		debian/luksformat.8
 	# generate gettext po files (for luksformat)
 	$(MAKE) -C debian/scripts/po all luksformat.pot
@@ -73,8 +79,8 @@ build-arch: build-stamp
 	# build upstream cryptsetup
 	$(MAKE)
 	# build askpass and passdev keyscripts
-	gcc $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic -std=c99 debian/askpass.c -o debian/askpass
-	gcc $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic -std=c99 debian/passdev.c -o debian/scripts/passdev
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic -std=c99 debian/askpass.c -o debian/askpass
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic -std=c99 debian/passdev.c -o debian/scripts/passdev
 
 build: build-indep build-arch
 
@@ -90,6 +96,7 @@ install-stamp: build-stamp
 
 	# Copy library files to library packages
 	mkdir -p $(CURDIR)/debian/libcryptsetup4/lib/$(DEB_HOST_MULTIARCH)/
+	mkdir -p $(CURDIR)/debian/libcryptsetup-dev/usr/lib/$(DEB_HOST_MULTIARCH)/pkgconfig
 	#mkdir -p $(CURDIR)/debian/libcryptsetup4/usr/lib/$(DEB_HOST_MULTIARCH)/
 
 	cp -a $(CURDIR)/debian/cryptsetup-bin/lib/libcryptsetup.so.* \
@@ -99,7 +106,7 @@ install-stamp: build-stamp
 	#cp -a $(CURDIR)/debian/cryptsetup-bin/lib/libcryptsetup.a \
 	#	$(CURDIR)/debian/libcryptsetup-dev/usr/lib/$(DEB_HOST_MULTIARCH)/
 	cp -a $(CURDIR)/debian/cryptsetup-bin/lib/pkgconfig/libcryptsetup.pc \
-		$(CURDIR)/debian/libcryptsetup-dev/usr/lib/pkgconfig/
+		$(CURDIR)/debian/libcryptsetup-dev/usr/lib/$(DEB_HOST_MULTIARCH)/pkgconfig/
 	cp -a $(CURDIR)/debian/cryptsetup-bin/usr/include/libcryptsetup.h \
 		$(CURDIR)/debian/libcryptsetup-dev/usr/include/
 	#cp -a $(CURDIR)/debian/cryptsetup-bin/lib/libcryptsetup.so \
@@ -115,8 +122,6 @@ install-stamp: build-stamp
 	install -m 0755 debian/scripts/luksformat $(CURDIR)/debian/cryptsetup-bin/usr/sbin/
 	install -m 0755 debian/scripts/cryptdisks_start $(CURDIR)/debian/cryptsetup/sbin/
 	install -m 0755 debian/scripts/cryptdisks_stop $(CURDIR)/debian/cryptsetup/sbin/
-	dh_link -pcryptsetup sbin/cryptdisks_start usr/sbin/cryptdisks_start
-	dh_link -pcryptsetup sbin/cryptdisks_stop usr/sbin/cryptdisks_stop
 	install -m 0755 debian/scripts/decrypt_* $(CURDIR)/debian/cryptsetup/lib/cryptsetup/scripts/
 	install -m 0755 debian/scripts/passdev $(CURDIR)/debian/cryptsetup/lib/cryptsetup/scripts/
 	install -m 0755 debian/askpass $(CURDIR)/debian/cryptsetup/lib/cryptsetup/
@@ -134,17 +139,23 @@ install-stamp: build-stamp
 		$(CURDIR)/debian/cryptsetup/usr/share/initramfs-tools/scripts/local-top/cryptopensc
 	install -m 0755 debian/initramfs/cryptpassdev-hook \
 		$(CURDIR)/debian/cryptsetup/usr/share/initramfs-tools/hooks/cryptpassdev
-	install -m 0644 debian/initramfs/cryptroot-conf \
+	install -m 0644 debian/initramfs/cryptroot-initramfs.conf \
 		$(CURDIR)/debian/cryptsetup/usr/share/initramfs-tools/conf-hooks.d/cryptsetup
+	install -m 0644 debian/initramfs/cryptroot-conf \
+		$(CURDIR)/debian/cryptsetup/etc/cryptsetup-initramfs/conf-hook
 	install -m 0755 debian/initramfs/cryptroot-hook \
 		$(CURDIR)/debian/cryptsetup/usr/share/initramfs-tools/hooks/cryptroot
+	install -m 0755 debian/initramfs/cryptroot-unlock \
+		$(CURDIR)/debian/cryptsetup/usr/share/cryptsetup/initramfs/bin/cryptroot-unlock
+	install -m 0755 debian/initramfs/cryptroot-unlock-hook \
+		$(CURDIR)/debian/cryptsetup/usr/share/initramfs-tools/hooks/cryptroot-unlock
 	install -m 0755 debian/initramfs/cryptroot-script \
 		$(CURDIR)/debian/cryptsetup/usr/share/initramfs-tools/scripts/local-top/cryptroot
 	install -m 0755 debian/initramfs/cryptroot-script-block \
 		$(CURDIR)/debian/cryptsetup/usr/share/initramfs-tools/scripts/local-block/cryptroot
 	install -m 0644 debian/cryptdisks.bash_completion \
-		$(CURDIR)/debian/cryptsetup/etc/bash_completion.d/cryptdisks
-	install -m 0755 debian/cryptsetup.reportbug-script \
+		$(CURDIR)/debian/cryptsetup/usr/share/bash-completion/completions/cryptdisks
+	install -m 0755 debian/cryptsetup.bug-script \
 		$(CURDIR)/debian/cryptsetup/usr/share/bug/cryptsetup
 ifeq ($(shell dpkg-vendor --is Ubuntu && echo yes),yes)
 	mkdir -p $(CURDIR)/debian/cryptsetup/usr/share/apport/package-hooks
@@ -162,12 +173,12 @@ binary-arch: build install
 	dh_testdir
 	dh_testroot
 	dh_installdebconf -a
-	dh_installchangelogs -a ChangeLog
+	dh_installchangelogs -a
 	dh_installdocs -a
 	dh_installexamples -a debian/scripts/gen-ssl-key
-	dh_installinit -a --no-start --name=cryptdisks-early --update-rcd-params="start 26 S . start 59 0 6 ."
+	dh_installinit -a --no-start --name=cryptdisks-early
 	dh_installinit -a --no-start --name=cryptdisks-udev
-	dh_installinit -a --no-start --name=cryptdisks --update-rcd-params="start 28 S . start 48 0 6 ."
+	dh_installinit -a --no-start --name=cryptdisks
 	dh_installman -a debian/doc/crypttab.5 debian/doc/cryptdisks_start.8 debian/doc/cryptdisks_stop.8
 	dh_installman -p cryptsetup-bin debian/luksformat.8
 	# Copy relevant parts to cryptsetup-udeb package
@@ -178,6 +189,7 @@ binary-arch: build install
 	# Copy relevant parts to libcryptsetup4-udeb package
 	cp -a $(CURDIR)/debian/libcryptsetup4/lib $(CURDIR)/debian/libcryptsetup4-udeb/
 	dh_lintian -a
+	dh_strip_nondeterminism
 	dh_compress -a
 	dh_fixperms -a
 	dh_strip -a

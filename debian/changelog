@@ -1,3 +1,289 @@
+cryptsetup (2:1.7.3-4) unstable; urgency=high
+
+  [ Guilhem Moulin ]
+  * Drop obsolete update-rc.d parameters.  Thanks to Michael Biebl for the
+    patch. (Closes: #847620)
+  * debian/copyright: Fix license mismatch (docs/examples/*
+    lib/crypto_backend/* lib/loopaes/* lib/tcrypt/* lib/verity/* python/* are
+    LGPL-2.1+ not GPL-2+). (Closes: #861802)
+  * debian/initramfs/cryptroot-hook: honor RESUME={none,auto} as documented in
+    initramfs.conf(5) by initramfs-tools >=0.129. (Closes: #861074)
+
+ -- Jonas Meurer <mejo@debian.org>  Tue, 09 May 2017 13:50:59 +0200
+
+cryptsetup (2:1.7.3-3) unstable; urgency=medium
+
+  [ Jonas Meurer ]
+  * debian/scripts/decrypt_ssl: fix script to actually output the decrypted
+    key. Apparently this script has been broken since June 2008. Doesn't seem
+    like anybody is using it. Thanks to g1 for spotting and reporting the
+    error. (Closes: #844050)
+  * debian/initramfs/cryptroot-script:
+    + limit the sleep after max passphrase attempts to devices for the rootfs.
+      This mitigates the negative impact in case of broken keyscripts etc.
+    + add $crypttarget to each message to provide more context.
+  * debian/initramfs/cryptroot-hook: fix sanity check for key files on root
+    fs in get_device_opts(): detect if processed device is a root (parent)
+    device even for LVM setups. (closes: #842951)
+  * debian/README.initramfs: minor fix to the decrypt_derived keyscript
+    section: now that systemd is standard, 'cryptdisks_start' should be used
+    instead of '/etc/init.d/cryptdisks start'.
+  * debian/manpages/crypttab.xml: add a warning to the 'keyscript' option
+    that systemd doesn't support the option (yet) and mention the possible
+    workaround to process the devices in question in the initramfs.
+
+  [ Guilhem Moulin ]
+  * add debian/gbp.conf to set the upstream tag to "v%(version%.%_)s".  As
+    this enables git-buildpackage >= 0.8.7 to automatically generate
+    orig.tar.gz, step nr. 5 is now removed from debian/README.source.
+  * debian/compat: bump debhelper compatibility version to 9.
+  * debian/initramfs/cryptroot-hook:
+    + fix tab damage for consistency with the rest of the code
+    + better warning for deprecated settings
+    + fix sanity check for key files in get_device_opts(): print a warning if
+      the key file isn't on the root FS, or if the root device is not
+      encrypted, even for LVM setups.
+    + fix sanity check for key files in get_device_opts(): print a warning if
+      the processed device is a resume device, even for LVM setups.
+    + fix runtime error in get_lvm_deps() if the first argument is either
+      missing or the empty string.
+    + reset IFS after processing $rootopts in get_device_opts(); the missing
+      linefeed in $IFS caused LVM logical volumes spaning over multiple PVs
+      not to have their parent devices detected correctly.
+
+ -- Jonas Meurer <mejo@debian.org>  Fri, 09 Dec 2016 01:18:17 +0100
+
+cryptsetup (2:1.7.3-2) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * debian/README.Debian: update authorized_keys(5) path, incorrect since
+    2:1.7.2-1, for remote unlocking at initramfs stage using the dropbear SSH
+    server.
+
+  [ Jonas Meurer ]
+  * debian/initramfs/cryptroot-script: sleep after max passphrase attempts.
+    This mitigates local brute-force attacks and addresses CVE-2016-4484.
+    Thanks to Ismael Ripoll and Hector Marco for discovery and report.
+    - decrease $count by one in tries loop if unlocking was successful.
+    - warn and sleep for 60 seconds if the maximum allowed attempts of
+      unlocking (configured with crypttab option tries, default=3) are
+      reached.
+
+ -- Jonas Meurer <mejo@debian.org>  Mon, 07 Nov 2016 11:34:41 +0100
+
+cryptsetup (2:1.7.3-1) unstable; urgency=medium
+
+  * New upstream release 1.7.3.
+  * debian/rules: run dh_strip_nondeterminism(1p) in binary-arch rules to
+    make the package build more reproducible. Introduces a new Build-Depends
+    on dh-strip-nondeterminism. Thanks to Reiner Herrmann for bugreport and
+    patch. (Closes: #842581)
+
+ -- Jonas Meurer <mejo@debian.org>  Mon, 31 Oct 2016 22:00:52 +0100
+
+cryptsetup (2:1.7.2-5) unstable; urgency=high
+
+  [ Guilhem Moulin ]
+  * debian/upstream/signing-key.asc: add upstream's armored OpenPGP key,
+    fingerprint 2A29 1824 3FDE 4664 8D06  86F9 D9B0 577B D93E 98FC.
+  * debian/watch: add "pgpsigurlmangle" option so uscan(1) can automatically
+    verify cryptographic signatures on release tarballs.
+
+  [ Jonas Meurer ]
+  * debian/initramfs/cryptroot-hook: only source crypt-hook from
+    /etc/cryptsetup-initramfs/ when present. (Closes: #841503)
+
+ -- Jonas Meurer <mejo@debian.org>  Fri, 21 Oct 2016 18:10:56 +0200
+
+cryptsetup (2:1.7.2-4) unstable; urgency=high
+
+  [ Guilhem Moulin ]
+  * debian/initramfs/cryptroot-hook:
+    + Fix warning printed for lvm devices backed by multiple dm-crypt nodes.
+      Regression introduced in 2:1.7.2-1.  Thanks Zoltan Hidvegi, for the
+      patch. (Closes: #840480)
+    + Don't escape all slash characters "/" in device paths of the form
+      /dev/by-label/..., only the label itself.  Regression introduced in
+      2:1.7.2-2 as a fix for #839888.
+
+ -- Jonas Meurer <mejo@debian.org>  Thu, 13 Oct 2016 23:11:45 +0200
+
+cryptsetup (2:1.7.2-3) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * debian/initramfs/cryptroot-conf: don't set CRYPTSETUP and KEYFILE_PATTERN,
+    so the (deprecated) values set in /etc/initramfs-tools aren't overridden
+    to the empty string by default.  Regression introduced in 2:1.7.2-1.
+    (Closes: #839994.)
+  * debian/README.initramfs: fixed minor typo.
+
+ -- Jonas Meurer <mejo@debian.org>  Sat, 08 Oct 2016 00:01:25 +0200
+
+cryptsetup (2:1.7.2-2) unstable; urgency=medium
+
+  * debian/cryptdisks.functions: fix a nasty typo in do_start that rendered
+    systems with sysVinit unbootable. Thanks to Marc Haber for bugreport and
+    patch (Closes: #839888)
+
+ -- Jonas Meurer <mejo@debian.org>  Thu, 06 Oct 2016 10:47:05 +0200
+
+cryptsetup (2:1.7.2-1) unstable; urgency=medium
+
+  [ Jonas Meurer ]
+  * new upstream release 1.7.2. Highlights include:
+    - code now uses kernel crypto API backend according to new changes
+      introduced in mainline kernel. (in 1.7.1)
+    - cryptsetup now allows special "-" (standard input) keyfile handling
+      even for TCRYPT (TrueCrypt and VeraCrypt compatible) devices. (in 1.7.1)
+    - Support activation options for error handling modes in Linux kernel
+      dm-verity module. (in 1.7.2)
+  * debian/cryptdisks.functions: use '--key-file=-' again with the tcrypt
+    extension, now that upstream issue #269 is fixed.
+  * migrate the packaging repository from SVN to Git:
+    - debian/control: Update Vcs-* fields to point to the new git repository.
+    - debian/README.source: document new repository structure and release
+      handling.
+  * debian/README.Debian, debian/NEWS: minor typo fixes.
+  * debian/rules: run pod2man --release="$(DEB_VERSION). (Closes: #839352)
+
+  [ Guilhem Moulin ]
+  * debian/control: add self to uploaders.
+  * debian/cryptdisks.functions: when iterating through the crypttab, don't
+    abort after the first disk that fails to be closed.  Regression introduced
+    2:1.7.0-1 when the filed is sourced under 'set -e'.
+  * debian/cryptdisks.functions: stop using `seq` since cryptsetup doesn't
+    depend on busybox.  Instead, try again after 1, 2, 4, 8 and 16s when an
+    encrypted disk cannot be closed. (Closes: #811456)
+  * debian/cryptsetup.maintscript: add a "rm_conffile" directive to remove
+    conffile /etc/bash_completion.d/cryptdisks, obsolete since 2:1.7.0-1.
+    (Closes: #810227)
+  * debian/README.initramfs: fix typo s/initramfs-update/update-initramfs/.
+    Thanks, Stuart Prescott. (Closes: #827263)
+  * debian/rules: Add 'hardening=+pie' to DEB_BUILD_MAINT_OPTIONS to compile
+    ELF executables as PIEs.
+  * debian/control: Bump Standards-Version to 3.9.8 (no changes necessary).
+  * debian/cryptsetup.lintian-overrides: Remove unused lintian override
+    init.d-script-does-not-source-init-functions.
+  * Use /etc/crytsetup-initramfs/conf-hook for initramfs hook script
+    configuration.  For backward compatibility setting CRYPTSETUP and
+    KEYFILE_PATTERN in /etc/initramfs-tools/initramfs.conf is still supported
+    for now, but causes the hook to print a warning.
+    This is done following the initramfs-tools maintainers' request (see
+    #807527) that hook and boot script configuration files be stored outside
+    the /etc/initramfs-tools directory. (Closes: #783393)
+  * Print a warning when private key material is to be included in the
+    initramfs image (ie, if $KEYFILE_PATTERN is not empty), and the image is
+    created with a permissive mode.
+  * Add Indonesian debconf templates translation.  Thanks, Izharul Haq for the
+    patch. (Closes: #835158)
+  * debian/initramfs/cryptroot-hook: Avoid leading space in $rootdevs,
+    $resumedevs, etc.
+  * Support unlocking devices at initramfs stage using a key file stored on
+    the encrypted root FS.  Note however that resume devices won't be unlocked
+    this way since the resume boot script is currently run before mounting the
+    root FS. (Closes: #776409)
+  * debian/initramfs/cryptroot-hook: Avoid undesired effects for target or
+    device names containing non-alphanumeric characters such as "." or "-":
+    + replace `grep "^$x\b"` by `awk -vx="$x" '$1==x {print}'`; and
+    + replace `echo "$x"` by printf '%s' "$x" when the argument might start
+      with a dash.
+  * debian/initramfs/cryptroot-{hook,script}, debian/cryptdisks.functions:
+    ensure slash characters "/" from device labels are escaped when
+    constructing symlinks under /dev/disk/by-label.
+  * debian/scripts/decrypt_gnupg:
+    + Remove --no-mdc-warning to display a warning if the MDC integrity
+      protection is missing.
+    + Replace "GnuPG key" by "gpg-encrypted key" in messages and
+      documentation.
+  * debian/initramfs/cryptgnupg-hook: Add support for multiple devices
+    encrypted using a gpg-encrypted key.
+  * debian/README.gnupg: Indicate that not the only the gpg-encrypted key for
+    the root FS is copied onto the initramfs, but also the ones for all
+    devices that need to be unlocked at initramfs stage.
+  * debian/initramfs/cryptroot-hook: Fix bug for device label starting with
+    "UUID=".
+
+  [ Helmut Grohne ]
+  * libcryptsetup-dev: move the .pc file to a multiarch location such that
+    cross-pkg-config can find it. (closes: #811545)
+  * Fix FTCBFS: Use host arch compiler for askpass as well. (closes: #811559)
+
+ -- Jonas Meurer <mejo@debian.org>  Wed, 05 Oct 2016 20:53:09 +0200
+
+cryptsetup (2:1.7.0-2) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * Fix cryptsetup shutdown procedure on sysvinit, broken since 2:1.7.0-1 for
+    systems without active crypttab entry at the time fo the shutdown.
+    (Closes: #792552, #810380)
+
+ -- Jonas Meurer <mejo@debian.org>  Sun, 10 Jan 2016 18:45:20 +0100
+
+cryptsetup (2:1.7.0-1) unstable; urgency=medium
+
+  [ Jonas Meurer ]
+  * new upstream release 1.7.0. Highlights include:
+    - cryptsetup TCRYPT mode now supports VeraCrypt devices (in 1.6.7)
+    - fix activation using (UNSECURE) ECB mode (in 1.6.7) (closes: #784129)
+    - properly support stdin "-" handling for luksAddKey for both new and old
+      keyfile parameters. (in 1.6.8)
+    - default hash function is now SHA256 (used in key derivation function
+      and anti-forensic splitter) (in 1.7.0)
+  * debian/cryptsetup.functions, debian/initramfs/cryptroot.{hook,script}: add
+    support for veracrypt option to cryptdisks initscript and cryptroot
+    initramfs script. (closes: #806290)
+  * debian/cryptdisks.functions: don't use '--key-file=-' with the tcrypt
+    extension. This fixes the tcrypt implementation in the initscript and
+    provides a workaround for upstream issue #269.
+  * debian/cryptsetup.bug-script: do not send potentially private information
+    without prior user confirmation in reportbug script. (Closes: #783298)
+  * debian/cryptsetup.apport: do not send potentially private information
+    without prior user confirmation in apport hook.
+  * debian/control, debian/NEWS: fix links to cryptsetup homepage/FAQ. Homepage
+    (and FAQ) moved from code.google.com to gitlab.com. (closes: #781674)
+  * debian/*: update hyperlinks to use https instead of http where appropriate.
+  * debian/rules, debian/post{inst,rm}: don't install cryptdisks_st{art,op}
+    symlinks to /usr/sbin if everything-in-usr directories scheme is used.
+    Thanks to Marco d'Itri for the patch. (closes: #767921)
+  * debian/scripts/luksformat: search for mkfs binaries in /usr/sbin, /usr/bin,
+    /sbin and /bin (default order in $PATH). This fixes luksformat for btrfs
+    filesystems. (closes: #805353)
+  * debian/dirs, debian/rules: install cryptdisks bash-completion script into
+    /usr/share/bash-completion/completions.
+  * debian/cryptdisks.functions: iterate over remaining open crypttab devices
+    in do_stop() in order to close dependent devices and don't freeze the
+    shutdown process. Thanks to Avatar for the patch. (closes: #792552)
+  * debian/rules: set V=1 in order to make build logs usable for blhc.
+  * debian/rules: set DEB_VERSION and DEB_DATE in a way to make cryptsetup
+    build reproducible. Thanks to Dhole and Valentin Lorentz for patches.
+    (closes: #780864, #794106)
+  * debian/cryptdisks.functions: bring the passphrase prompt in line with the
+    one from initramfs script in order to make the user experience more
+    consistent. (closes: #772943)
+  * debian/initramfs/cryptroot-script: move sanity checks of $cryptkeyscript
+    and potential expansion to '/lib/cryptsetup/askpass' to the beginning of
+    setup_mapping().
+
+  [ Guilhem Moulin ]
+  * debian/README.{Debian,remote}: remove dropbear-specific configuration and
+    point to dropbear-initramfs instead. Since version 2015.70-1, dropbear
+    ships dropbear-specific initramfs configuration and documentation in an
+    own binary package dropbear-initramfs. (closes: #801471)
+  * debian/initramfs/cryptroot-{hook,script}: add support for 'keyslot' option
+    to cryptroot initramfs script. (closes: #801479)
+  * debian/README.initramfs, debian/initramfs/cryptroot-hook: add support for
+    storing keyfiles directly in the initrd. (closes: #786578)
+  * debian/initramfs/cryptroot-hook: display a warning for invalid source
+    devices. (closes: #720515, #781955, #784435)
+  * debian/askpass.c: add plymouth support to the askpass helper command.
+  * debian/cryptdisks.functions, debian/initramfs/cryptroot-script: remove
+    special treatment of plymouth installations now that askpass supports
+    plymouth natively.
+  * debian/initramfs/cryptroot-unlock(-hook): add initramfs hook and script
+    to remotely unlock cryptroot devices. (closes: #782024, #697156)
+
+ -- Jonas Meurer <mejo@debian.org>  Thu, 07 Jan 2016 02:22:33 +0100
+
 cryptsetup (2:1.6.6-5pexip1) pexip; urgency=medium
 
   * Prepare Pexip packaging
@@ -804,7 +1090,7 @@ cryptsetup (2:1.0.7-2) unstable; urgency=low
   * add 04_no_stderr_success.patch, which adds an option to suppress success
     messages to stderr. don't apply the patch as this already has been fixed
     upstream in another way. next cryptsetup release will print the command
-    successfull message to stdout only if opt_verbose is set.
+    successful message to stdout only if opt_verbose is set.
   * add checkscripts blkid and un_blkid for the reason that vol_id will be
     removed from udev soon. advertise the new scripts at all places that
     mentioned vol_id or un_vol_id before.
