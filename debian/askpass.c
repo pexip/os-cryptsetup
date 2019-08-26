@@ -21,7 +21,7 @@
 
 
 #define _GNU_SOURCE
-#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 1
 #include <stdio.h>
 #include <unistd.h>
@@ -359,8 +359,10 @@ console_read(int fd, char **buf, size_t *size)
 	/* Console is in ICANON mode so we'll get entire lines */
 	nread = getline(&consolebuf, &consolebuflen, stdin);
 
-	if (nread < 0)
-		return NULL;
+	if (nread < 0) {
+		clearerr(stdin);
+		return false;
+	}
 
 	/* Strip trailing newline, if any */
 	if (nread > 0 && consolebuf[nread - 1] == '\n') {

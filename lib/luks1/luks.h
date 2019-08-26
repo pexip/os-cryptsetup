@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup
  *
- * Copyright (C) 2004-2006, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2012, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2004-2006 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -40,6 +40,9 @@
 #define LUKS_MKD_ITERATIONS_MIN  1000
 #define LUKS_SLOT_ITERATIONS_MIN 1000
 
+// Iteration time for digest in ms
+#define LUKS_MKD_ITERATIONS_MS 125
+
 #define LUKS_KEY_DISABLED_OLD 0
 #define LUKS_KEY_ENABLED_OLD 0xCAFE
 
@@ -57,6 +60,9 @@
 
 /* Offset to keyslot area [in bytes] */
 #define LUKS_ALIGN_KEYSLOTS 4096
+
+/* Maximal LUKS header size, for wipe [in bytes] */
+#define LUKS_MAX_KEYSLOT_SIZE 0x1000000 /* 16 MB, up to 32768 bits key */
 
 /* Any integer values are stored in network byte order on disk and must be
 converted */
@@ -96,19 +102,20 @@ struct luks_phdr {
 int LUKS_verify_volume_key(const struct luks_phdr *hdr,
 			   const struct volume_key *vk);
 
-int LUKS_generate_phdr(
-	struct luks_phdr *header,
+int LUKS_check_cipher(struct crypt_device *ctx,
+		      size_t keylength,
+		      const char *cipher,
+		      const char *cipher_mode);
+
+int LUKS_generate_phdr(struct luks_phdr *header,
 	const struct volume_key *vk,
 	const char *cipherName,
 	const char *cipherMode,
 	const char *hashSpec,
 	const char *uuid,
-	unsigned int stripes,
-	unsigned int alignPayload,
-	unsigned int alignOffset,
-	uint32_t iteration_time_ms,
-	uint64_t *PBKDF2_per_sec,
-	int detached_metadata_device,
+	uint64_t data_offset,
+	uint64_t align_offset,
+	uint64_t required_alignment,
 	struct crypt_device *ctx);
 
 int LUKS_read_phdr(
@@ -147,8 +154,6 @@ int LUKS_set_key(
 	size_t passwordLen,
 	struct luks_phdr *hdr,
 	struct volume_key *vk,
-	uint32_t iteration_time_ms,
-	uint64_t *PBKDF2_per_sec,
 	struct crypt_device *ctx);
 
 int LUKS_open_key_with_hdr(
@@ -164,30 +169,22 @@ int LUKS_del_key(
 	struct luks_phdr *hdr,
 	struct crypt_device *ctx);
 
+int LUKS_wipe_header_areas(struct luks_phdr *hdr,
+	struct crypt_device *ctx);
+
 crypt_keyslot_info LUKS_keyslot_info(struct luks_phdr *hdr, int keyslot);
 int LUKS_keyslot_find_empty(struct luks_phdr *hdr);
 int LUKS_keyslot_active_count(struct luks_phdr *hdr);
-int LUKS_keyslot_set(struct luks_phdr *hdr, int keyslot, int enable);
-int LUKS_keyslot_area(struct luks_phdr *hdr,
+int LUKS_keyslot_set(struct luks_phdr *hdr, int keyslot, int enable,
+		     struct crypt_device *ctx);
+int LUKS_keyslot_area(const struct luks_phdr *hdr,
 	int keyslot,
 	uint64_t *offset,
 	uint64_t *length);
-
-int LUKS_encrypt_to_storage(
-	char *src, size_t srcLength,
-	const char *cipher,
-	const char *cipher_mode,
-	struct volume_key *vk,
-	unsigned int sector,
-	struct crypt_device *ctx);
-
-int LUKS_decrypt_from_storage(
-	char *dst, size_t dstLength,
-	const char *cipher,
-	const char *cipher_mode,
-	struct volume_key *vk,
-	unsigned int sector,
-	struct crypt_device *ctx);
+size_t LUKS_device_sectors(const struct luks_phdr *hdr);
+size_t LUKS_keyslots_offset(const struct luks_phdr *hdr);
+int LUKS_keyslot_pbkdf(struct luks_phdr *hdr, int keyslot,
+		       struct crypt_pbkdf_type *pbkdf);
 
 int LUKS1_activate(struct crypt_device *cd,
 		   const char *name,
