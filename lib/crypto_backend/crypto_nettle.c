@@ -1,8 +1,8 @@
 /*
  * Nettle crypto backend implementation
  *
- * Copyright (C) 2011-2016 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2011-2016, Milan Broz
+ * Copyright (C) 2011-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,11 +23,19 @@
 #include <string.h>
 #include <errno.h>
 #include <nettle/sha.h>
+#include <nettle/sha3.h>
 #include <nettle/hmac.h>
 #include <nettle/pbkdf2.h>
 #include "crypto_backend.h"
 
-static char *version = "Nettle";
+#if HAVE_NETTLE_VERSION_H
+#include <nettle/version.h>
+#define VSTR(s) STR(s)
+#define STR(s) #s
+static const char *version = "Nettle "VSTR(NETTLE_VERSION_MAJOR)"."VSTR(NETTLE_VERSION_MINOR);
+#else
+static const char *version = "Nettle";
+#endif
 
 typedef void (*init_func) (void *);
 typedef void (*update_func) (void *, size_t, const uint8_t *);
@@ -44,6 +52,24 @@ struct hash_alg {
 	digest_func hmac_digest;
 	set_key_func hmac_set_key;
 };
+
+/* Missing HMAC wrappers in Nettle */
+#define HMAC_FCE(xxx) \
+struct xhmac_##xxx##_ctx HMAC_CTX(struct xxx##_ctx); \
+static void xhmac_##xxx##_set_key(struct xhmac_##xxx##_ctx *ctx, \
+size_t key_length, const uint8_t *key) \
+{HMAC_SET_KEY(ctx, &nettle_##xxx, key_length, key);} \
+static void xhmac_##xxx##_update(struct xhmac_##xxx##_ctx *ctx, \
+size_t length, const uint8_t *data) \
+{xxx##_update(&ctx->state, length, data);} \
+static void xhmac_##xxx##_digest(struct xhmac_##xxx##_ctx *ctx, \
+size_t length, uint8_t *digest) \
+{HMAC_DIGEST(ctx, &nettle_##xxx, length, digest);}
+
+HMAC_FCE(sha3_224);
+HMAC_FCE(sha3_256);
+HMAC_FCE(sha3_384);
+HMAC_FCE(sha3_512);
 
 static struct hash_alg hash_algs[] = {
 	{ "sha1", SHA1_DIGEST_SIZE,
@@ -94,6 +120,41 @@ static struct hash_alg hash_algs[] = {
 		(digest_func) hmac_ripemd160_digest,
 		(set_key_func) hmac_ripemd160_set_key,
 	},
+/* Nettle prior to version 3.2 has incompatible SHA3 implementation */
+#if NETTLE_SHA3_FIPS202
+	{ "sha3-224", SHA3_224_DIGEST_SIZE,
+		(init_func) sha3_224_init,
+		(update_func) sha3_224_update,
+		(digest_func) sha3_224_digest,
+		(update_func) xhmac_sha3_224_update,
+		(digest_func) xhmac_sha3_224_digest,
+		(set_key_func) xhmac_sha3_224_set_key,
+	},
+	{ "sha3-256", SHA3_256_DIGEST_SIZE,
+		(init_func) sha3_256_init,
+		(update_func) sha3_256_update,
+		(digest_func) sha3_256_digest,
+		(update_func) xhmac_sha3_256_update,
+		(digest_func) xhmac_sha3_256_digest,
+		(set_key_func) xhmac_sha3_256_set_key,
+	},
+	{ "sha3-384", SHA3_384_DIGEST_SIZE,
+		(init_func) sha3_384_init,
+		(update_func) sha3_384_update,
+		(digest_func) sha3_384_digest,
+		(update_func) xhmac_sha3_384_update,
+		(digest_func) xhmac_sha3_384_digest,
+		(set_key_func) xhmac_sha3_384_set_key,
+	},
+	{ "sha3-512", SHA3_512_DIGEST_SIZE,
+		(init_func) sha3_512_init,
+		(update_func) sha3_512_update,
+		(digest_func) sha3_512_digest,
+		(update_func) xhmac_sha3_512_update,
+		(digest_func) xhmac_sha3_512_digest,
+		(set_key_func) xhmac_sha3_512_set_key,
+	},
+#endif
 	{ NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, }
 };
 
@@ -105,6 +166,11 @@ struct crypt_hash {
 		struct sha256_ctx sha256;
 		struct sha384_ctx sha384;
 		struct sha512_ctx sha512;
+		struct ripemd160_ctx ripemd160;
+		struct sha3_224_ctx sha3_224;
+		struct sha3_256_ctx sha3_256;
+		struct sha3_384_ctx sha3_384;
+		struct sha3_512_ctx sha3_512;
 	} nettle_ctx;
 };
 
@@ -116,6 +182,11 @@ struct crypt_hmac {
 		struct hmac_sha256_ctx sha256;
 		struct hmac_sha384_ctx sha384;
 		struct hmac_sha512_ctx sha512;
+		struct hmac_ripemd160_ctx ripemd160;
+		struct xhmac_sha3_224_ctx sha3_224;
+		struct xhmac_sha3_256_ctx sha3_256;
+		struct xhmac_sha3_384_ctx sha3_384;
+		struct xhmac_sha3_512_ctx sha3_512;
 	} nettle_ctx;
 	size_t key_length;
 	uint8_t *key;
@@ -141,6 +212,11 @@ static struct hash_alg *_get_alg(const char *name)
 int crypt_backend_init(struct crypt_device *ctx)
 {
 	return 0;
+}
+
+void crypt_backend_destroy(void)
+{
+	return;
 }
 
 const char *crypt_backend_version(void)
@@ -197,11 +273,10 @@ int crypt_hash_final(struct crypt_hash *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hash_destroy(struct crypt_hash *ctx)
+void crypt_hash_destroy(struct crypt_hash *ctx)
 {
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* HMAC */
@@ -211,7 +286,7 @@ int crypt_hmac_size(const char *name)
 }
 
 int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
-		    const void *buffer, size_t length)
+		    const void *key, size_t key_length)
 {
 	struct crypt_hmac *h;
 
@@ -225,12 +300,12 @@ int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
 	if (!h->hash)
 		goto bad;
 
-	h->key = malloc(length);
+	h->key = malloc(key_length);
 	if (!h->key)
 		goto bad;
 
-	memcpy(h->key, buffer, length);
-	h->key_length = length;
+	memcpy(h->key, key, key_length);
+	h->key_length = key_length;
 
 	h->hash->init(&h->nettle_ctx);
 	h->hash->hmac_set_key(&h->nettle_ctx, h->key_length, h->key);
@@ -263,13 +338,12 @@ int crypt_hmac_final(struct crypt_hmac *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hmac_destroy(struct crypt_hmac *ctx)
+void crypt_hmac_destroy(struct crypt_hmac *ctx)
 {
 	memset(ctx->key, 0, ctx->key_length);
 	free(ctx->key);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* RNG - N/A */
@@ -283,23 +357,29 @@ int crypt_pbkdf(const char *kdf, const char *hash,
 		const char *password, size_t password_length,
 		const char *salt, size_t salt_length,
 		char *key, size_t key_length,
-		unsigned int iterations)
+		uint32_t iterations, uint32_t memory, uint32_t parallel)
 {
 	struct crypt_hmac *h;
 	int r;
 
-	if (!kdf || strncmp(kdf, "pbkdf2", 6))
+	if (!kdf)
 		return -EINVAL;
 
-	r = crypt_hmac_init(&h, hash, password, password_length);
-	if (r < 0)
-		return r;
+	if (!strcmp(kdf, "pbkdf2")) {
+		r = crypt_hmac_init(&h, hash, password, password_length);
+		if (r < 0)
+			return r;
 
-	nettle_pbkdf2(&h->nettle_ctx, h->hash->nettle_hmac_update,
-		      h->hash->nettle_hmac_digest, h->hash->length, iterations,
-		      salt_length, (const uint8_t *)salt, key_length,
-		      (uint8_t *)key);
-	crypt_hmac_destroy(h);
+		nettle_pbkdf2(&h->nettle_ctx, h->hash->hmac_update,
+			      h->hash->hmac_digest, h->hash->length, iterations,
+			      salt_length, (const uint8_t *)salt, key_length,
+			      (uint8_t *)key);
+		crypt_hmac_destroy(h);
+		return 0;
+	} else if (!strncmp(kdf, "argon2", 6)) {
+		return argon2(kdf, password, password_length, salt, salt_length,
+			      key, key_length, iterations, memory, parallel);
+	}
 
-	return 0;
+	return -EINVAL;
 }

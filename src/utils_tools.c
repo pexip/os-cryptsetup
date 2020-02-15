@@ -1,10 +1,10 @@
 /*
  * cryptsetup - setup cryptographic volumes for dm-crypt
  *
- * Copyright (C) 2004, Jana Saout <jana@saout.de>
- * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2012, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2014, Milan Broz
+ * Copyright (C) 2004 Jana Saout <jana@saout.de>
+ * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -22,11 +22,14 @@
  */
 
 #include "cryptsetup.h"
+#include <math.h>
 #include <signal.h>
 
 int opt_verbose = 0;
 int opt_debug = 0;
+int opt_debug_json = 0;
 int opt_batch_mode = 0;
+int opt_progress_frequency = 0;
 
 /* interrupt handling */
 volatile int quit = 0;
@@ -74,29 +77,26 @@ void check_signal(int *r)
 		*r = -EINTR;
 }
 
+#define LOG_MAX_LEN 4096
+
 __attribute__((format(printf, 5, 6)))
 void clogger(struct crypt_device *cd, int level, const char *file, int line,
 	     const char *format, ...)
 {
 	va_list argp;
-	char *target = NULL;
+	char target[LOG_MAX_LEN + 2];
 
 	va_start(argp, format);
 
-	if (vasprintf(&target, format, argp) > 0) {
-		if (level >= 0) {
-			crypt_log(cd, level, target);
-#ifdef CRYPT_DEBUG
-		} else if (opt_debug)
-			printf("# %s:%d %s\n", file ?: "?", line, target);
-#else
-		} else if (opt_debug)
-			printf("# %s\n", target);
-#endif
+	if (vsnprintf(&target[0], LOG_MAX_LEN, format, argp) > 0) {
+		/* All verbose and error messages in tools end with EOL. */
+		if (level == CRYPT_LOG_VERBOSE || level == CRYPT_LOG_ERROR)
+			strncat(target, "\n", LOG_MAX_LEN);
+
+		crypt_log(cd, level, target);
 	}
 
 	va_end(argp);
-	free(target);
 }
 
 void tool_log(int level, const char *msg, void *usrptr __attribute__((unused)))
@@ -104,21 +104,19 @@ void tool_log(int level, const char *msg, void *usrptr __attribute__((unused)))
 	switch(level) {
 
 	case CRYPT_LOG_NORMAL:
-		fputs(msg, stdout);
+		fprintf(stdout, "%s", msg);
 		break;
 	case CRYPT_LOG_VERBOSE:
 		if (opt_verbose)
-			fputs(msg, stdout);
+			fprintf(stdout, "%s", msg);
 		break;
 	case CRYPT_LOG_ERROR:
-		fputs(msg, stderr);
+		fprintf(stderr, "%s", msg);
 		break;
+	case CRYPT_LOG_DEBUG_JSON:
 	case CRYPT_LOG_DEBUG:
 		if (opt_debug)
-			printf("# %s\n", msg);
-		break;
-	default:
-		fprintf(stderr, "Internal error on logging class for msg: %s", msg);
+			fprintf(stdout, "# %s\n", msg);
 		break;
 	}
 }
@@ -130,8 +128,9 @@ void quiet_log(int level, const char *msg, void *usrptr)
 	tool_log(level, msg, usrptr);
 }
 
-int yesDialog(const char *msg, void *usrptr __attribute__((unused)))
+int yesDialog(const char *msg, void *usrptr)
 {
+	const char *fail_msg = (const char *)usrptr;
 	char *answer = NULL;
 	size_t size = 0;
 	int r = 1, block;
@@ -140,7 +139,7 @@ int yesDialog(const char *msg, void *usrptr __attribute__((unused)))
 	if (block)
 		set_int_block(0);
 
-	if(isatty(STDIN_FILENO) && !opt_batch_mode) {
+	if (isatty(STDIN_FILENO) && !opt_batch_mode) {
 		log_std("\nWARNING!\n========\n");
 		log_std("%s\n\nAre you sure? (Type uppercase yes): ", msg);
 		fflush(stdout);
@@ -148,11 +147,14 @@ int yesDialog(const char *msg, void *usrptr __attribute__((unused)))
 			r = 0;
 			/* Aborted by signal */
 			if (!quit)
-				log_err(_("Error reading response from terminal.\n"));
+				log_err(_("Error reading response from terminal."));
 			else
 				log_dbg("Query interrupted on signal.");
-		} else if(strcmp(answer, "YES\n"))
+		} else if (strcmp(answer, "YES\n")) {
 			r = 0;
+			if (fail_msg)
+				log_err("%s", fail_msg);
+		}
 	}
 
 	if (block && !quit)
@@ -164,7 +166,7 @@ int yesDialog(const char *msg, void *usrptr __attribute__((unused)))
 
 void show_status(int errcode)
 {
-	char error[256];
+	char *crypt_error;
 
 	if(!opt_verbose)
 		return;
@@ -174,25 +176,23 @@ void show_status(int errcode)
 		return;
 	}
 
-	crypt_get_error(error, sizeof(error));
+	if (errcode < 0)
+		errcode = translate_errno(errcode);
 
-	if (*error) {
-#ifdef STRERROR_R_CHAR_P /* GNU-specific strerror_r */
-		char *error_ = strerror_r(-errcode, error, sizeof(error));
-		if (error_ != error)
-			strncpy(error, error_, sizeof(error));
-#else /* POSIX strerror_r variant */
-		if (strerror_r(-errcode, error, sizeof(error)))
-			*error = '\0';
-#endif
-		error[sizeof(error) - 1] = '\0';
-	}
-
-	log_err(_("Command failed with code %i"), -errcode);
-	if (*error)
-		log_err(": %s\n", error);
+	if (errcode == 1)
+		crypt_error = _("wrong or missing parameters");
+	else if (errcode == 2)
+		crypt_error = _("no permission or bad passphrase");
+	else if (errcode == 3)
+		crypt_error = _("out of memory");
+	else if (errcode == 4)
+		crypt_error = _("wrong device or file specified");
+	else if (errcode == 5)
+		crypt_error = _("device already exists or device is busy");
 	else
-		log_err(".\n");
+		crypt_error = _("unknown error");
+
+	log_std(_("Command failed with code %i (%s).\n"), -errcode, crypt_error);
 }
 
 const char *uuid_or_device(const char *spec)
@@ -226,7 +226,7 @@ __attribute__ ((noreturn)) void usage(poptContext popt_context,
 {
 	poptPrintUsage(popt_context, stderr, 0);
 	if (error)
-		log_err("%s: %s\n", more, error);
+		log_err("%s: %s", more, error);
 	poptFreeContext(popt_context);
 	exit(exitcode);
 }
@@ -261,6 +261,30 @@ int translate_errno(int r)
 	default:	r = EXIT_FAILURE;
 	}
 	return r;
+}
+
+void tools_keyslot_msg(int keyslot, crypt_object_op op)
+{
+	if (keyslot < 0)
+		return;
+
+	if (op == CREATED)
+		log_verbose(_("Key slot %i created."), keyslot);
+	else if (op == UNLOCKED)
+		log_verbose(_("Key slot %i unlocked."), keyslot);
+	else if (op == REMOVED)
+		log_verbose(_("Key slot %i removed."), keyslot);
+}
+
+void tools_token_msg(int token, crypt_object_op op)
+{
+	if (token < 0)
+		return;
+
+	if (op == CREATED)
+		log_verbose(_("Token %i created."), token);
+	else if (op == REMOVED)
+		log_verbose(_("Token %i removed."), token);
 }
 
 /*
@@ -326,4 +350,245 @@ int tools_string_to_size(struct crypt_device *cd, const char *s, uint64_t *size)
 
 	*size = tmp;
 	return 0;
+}
+
+/* Time progress helper */
+
+/* The difference in seconds between two times in "timeval" format. */
+static double time_diff(struct timeval *start, struct timeval *end)
+{
+	return (end->tv_sec - start->tv_sec)
+		+ (end->tv_usec - start->tv_usec) / 1E6;
+}
+
+void tools_clear_line(void)
+{
+	if (opt_progress_frequency)
+		return;
+	/* vt100 code clear line */
+	log_std("\33[2K\r");
+}
+
+void tools_time_progress(uint64_t device_size, uint64_t bytes,
+			 struct timeval *start_time, struct timeval *end_time)
+{
+	struct timeval now_time;
+	unsigned long long mbytes, eta;
+	double tdiff, mib, frequency;
+	int final = (bytes == device_size);
+	const char *eol;
+
+	if (opt_batch_mode)
+		return;
+
+	gettimeofday(&now_time, NULL);
+	if (start_time->tv_sec == 0 && start_time->tv_usec == 0) {
+		*start_time = now_time;
+		*end_time = now_time;
+		return;
+	}
+
+	if (opt_progress_frequency) {
+		frequency = (double)opt_progress_frequency;
+		eol = "\n";
+	} else {
+		frequency = 0.5;
+		eol = "";
+	}
+
+	if (!final && time_diff(end_time, &now_time) < frequency)
+		return;
+
+	*end_time = now_time;
+
+	tdiff = time_diff(start_time, end_time);
+	if (!tdiff)
+		return;
+
+	mbytes = bytes  / 1024 / 1024;
+	mib = (double)(mbytes) / tdiff;
+	if (!mib)
+		return;
+
+	/* FIXME: calculate this from last minute only and remaining space */
+	eta = (unsigned long long)(device_size / 1024 / 1024 / mib - tdiff);
+
+	tools_clear_line();
+	if (final)
+		log_std("Finished, time %02llu:%02llu.%03llu, "
+			"%4llu MiB written, speed %5.1f MiB/s\n",
+			(unsigned long long)tdiff / 60,
+			(unsigned long long)tdiff % 60,
+			(unsigned long long)((tdiff - floor(tdiff)) * 1000.0),
+			mbytes, mib);
+	else
+		log_std("Progress: %5.1f%%, ETA %02llu:%02llu, "
+			"%4llu MiB written, speed %5.1f MiB/s%s",
+			(double)bytes / device_size * 100,
+			eta / 60, eta % 60, mbytes, mib, eol);
+	fflush(stdout);
+}
+
+int tools_wipe_progress(uint64_t size, uint64_t offset, void *usrptr)
+{
+	static struct timeval start_time = {}, end_time = {};
+	int r = 0;
+
+	tools_time_progress(size, offset, &start_time, &end_time);
+
+	check_signal(&r);
+	if (r) {
+		tools_clear_line();
+		log_err("\nWipe interrupted.");
+	}
+
+	return r;
+}
+
+static void report_partition(const char *value, const char *device)
+{
+	if (opt_batch_mode)
+		log_dbg("Device %s already contains a '%s' partition signature.", device, value);
+	else
+		log_std(_("WARNING: Device %s already contains a '%s' partition signature.\n"), device, value);
+}
+
+static void report_superblock(const char *value, const char *device)
+{
+	if (opt_batch_mode)
+		log_dbg("Device %s already contains a '%s' superblock signature.", device, value);
+	else
+		log_std(_("WARNING: Device %s already contains a '%s' superblock signature.\n"), device, value);
+}
+
+int tools_detect_signatures(const char *device, int ignore_luks, size_t *count)
+{
+	int r;
+	size_t tmp_count;
+	struct blkid_handle *h;
+	blk_probe_status pr;
+
+	if (!count)
+		count = &tmp_count;
+
+	*count = 0;
+
+	if (!blk_supported()) {
+		log_dbg("Blkid support disabled.");
+		return 0;
+	}
+
+	if ((r = blk_init_by_path(&h, device))) {
+		log_err(_("Failed to initialize device signature probes."));
+		return -EINVAL;
+	}
+
+	blk_set_chains_for_full_print(h);
+
+	if (ignore_luks && blk_superblocks_filter_luks(h)) {
+		r = -EINVAL;
+		goto out;
+	}
+
+	while ((pr = blk_probe(h)) < PRB_EMPTY) {
+		if (blk_is_partition(h))
+			report_partition(blk_get_partition_type(h), device);
+		else if (blk_is_superblock(h))
+			report_superblock(blk_get_superblock_type(h), device);
+		else {
+			log_dbg("Internal tools_detect_signatures() error.");
+			r = -EINVAL;
+			goto out;
+		}
+		(*count)++;
+	}
+
+	if (pr == PRB_FAIL)
+		r = -EINVAL;
+out:
+	blk_free(h);
+	return r;
+}
+
+int tools_wipe_all_signatures(const char *path)
+{
+	int fd, flags, r;
+	blk_probe_status pr;
+	struct stat st;
+	struct blkid_handle *h = NULL;
+
+	if (!blk_supported()) {
+		log_dbg("Blkid support disabled.");
+		return 0;
+	}
+
+	if (stat(path, &st)) {
+		log_err(_("Failed to stat device %s."), path);
+		return -EINVAL;
+	}
+
+	flags = O_RDWR;
+	if (S_ISBLK(st.st_mode))
+		flags |= O_EXCL;
+
+	/* better than opening regular file with O_EXCL (undefined) */
+	/* coverity[toctou] */
+	fd = open(path, flags);
+	if (fd < 0) {
+		if (errno == EBUSY)
+			log_err(_("Device %s is in use. Can not proceed with format operation."), path);
+		else
+			log_err(_("Failed to open file %s in read/write mode."), path);
+		return -EINVAL;
+	}
+
+	if ((r = blk_init_by_fd(&h, fd))) {
+		log_err(_("Failed to initialize device signature probes."));
+		r = -EINVAL;
+		goto out;
+	}
+
+	blk_set_chains_for_wipes(h);
+
+	while ((pr = blk_probe(h)) < PRB_EMPTY) {
+		if (blk_is_partition(h))
+			log_verbose("Existing '%s' partition signature on device %s will be wiped.",
+				    blk_get_partition_type(h), path);
+		if (blk_is_superblock(h))
+			log_verbose("Existing '%s' superblock signature on device %s will be wiped.",
+				    blk_get_superblock_type(h), path);
+		if (blk_do_wipe(h)) {
+			log_err(_("Failed to wipe device signature."));
+			r = -EINVAL;
+			goto out;
+		}
+	}
+
+	if (pr != PRB_EMPTY) {
+		log_err(_("Failed to probe device %s for a signature."), path);
+		r = -EINVAL;
+	}
+out:
+	close(fd);
+	blk_free(h);
+	return r;
+}
+
+int tools_is_cipher_null(const char *cipher)
+{
+	if (!cipher)
+		return 0;
+
+	return !strcmp(cipher, "cipher_null") ? 1 : 0;
+}
+
+/*
+ * Keyfile - is standard input treated as a binary file (no EOL handling).
+ */
+int tools_is_stdin(const char *key_file)
+{
+	if (!key_file)
+		return 1;
+
+	return strcmp(key_file, "-") ? 0 : 1;
 }

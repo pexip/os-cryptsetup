@@ -1,11 +1,11 @@
 /*
  * AFsplitter - Anti forensic information splitter
  *
- * Copyright (C) 2004, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2012, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2004 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
  *
  * AFsplitter diffuses information over a large stripe of data,
- * therefor supporting secure data destruction.
+ * therefore supporting secure data destruction.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,6 +24,8 @@
 #ifndef INCLUDED_CRYPTSETUP_LUKS_AF_H
 #define INCLUDED_CRYPTSETUP_LUKS_AF_H
 
+#include <stddef.h>
+
 /*
  * AF_split operates on src and produces information split data in
  * dst. src is assumed to be of the length blocksize. The data stripe
@@ -37,8 +39,26 @@
  * On error, both functions return -1, 0 otherwise.
  */
 
-int AF_split(char *src, char *dst, size_t blocksize, unsigned int blocknumbers, const char *hash);
-int AF_merge(char *src, char *dst, size_t blocksize, unsigned int blocknumbers, const char *hash);
+int AF_split(struct crypt_device *ctx, const char *src, char *dst,
+	     size_t blocksize, unsigned int blocknumbers, const char *hash);
+int AF_merge(struct crypt_device *ctx, const char *src, char *dst, size_t blocksize,
+	     unsigned int blocknumbers, const char *hash);
 size_t AF_split_sectors(size_t blocksize, unsigned int blocknumbers);
+
+int LUKS_encrypt_to_storage(
+	char *src, size_t srcLength,
+	const char *cipher,
+	const char *cipher_mode,
+	struct volume_key *vk,
+	unsigned int sector,
+	struct crypt_device *ctx);
+
+int LUKS_decrypt_from_storage(
+	char *dst, size_t dstLength,
+	const char *cipher,
+	const char *cipher_mode,
+	struct volume_key *vk,
+	unsigned int sector,
+	struct crypt_device *ctx);
 
 #endif

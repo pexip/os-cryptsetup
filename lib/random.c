@@ -1,7 +1,7 @@
 /*
  * cryptsetup kernel RNG access functions
  *
- * Copyright (C) 2010-2012, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -27,6 +27,10 @@
 
 #include "libcryptsetup.h"
 #include "internal.h"
+
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
 
 static int random_initialised = 0;
 
@@ -152,24 +156,24 @@ int crypt_random_init(struct crypt_device *ctx)
 
 	/* Used for CRYPT_RND_NORMAL */
 	if(urandom_fd == -1)
-		urandom_fd = open(URANDOM_DEVICE, O_RDONLY);
+		urandom_fd = open(URANDOM_DEVICE, O_RDONLY | O_CLOEXEC);
 	if(urandom_fd == -1)
 		goto fail;
 
 	/* Used for CRYPT_RND_KEY */
 	if(random_fd == -1)
-		random_fd = open(RANDOM_DEVICE, O_RDONLY | O_NONBLOCK);
+		random_fd = open(RANDOM_DEVICE, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	if(random_fd == -1)
 		goto fail;
 
 	if (crypt_fips_mode())
-		log_verbose(ctx, _("Running in FIPS mode.\n"));
+		log_verbose(ctx, _("Running in FIPS mode."));
 
 	random_initialised = 1;
 	return 0;
 fail:
 	crypt_random_exit();
-	log_err(ctx, _("Fatal error during RNG initialisation.\n"));
+	log_err(ctx, _("Fatal error during RNG initialisation."));
 	return -ENOSYS;
 }
 
@@ -206,13 +210,12 @@ int crypt_random_get(struct crypt_device *ctx, char *buf, size_t len, int qualit
 		}
 		break;
 	default:
-		log_err(ctx, _("Unknown RNG quality requested.\n"));
+		log_err(ctx, _("Unknown RNG quality requested."));
 		return -EINVAL;
 	}
 
 	if (status)
-		log_err(ctx, _("Error %d reading from RNG: %s\n"),
-			errno, strerror(errno));
+		log_err(ctx, _("Error reading from RNG."));
 
 	return status;
 }
