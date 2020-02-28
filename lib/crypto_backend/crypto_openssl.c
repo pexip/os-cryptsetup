@@ -1,8 +1,8 @@
 /*
  * OPENSSL crypto backend implementation
  *
- * Copyright (C) 2010-2016, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2016, Milan Broz
+ * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -49,31 +49,22 @@ struct crypt_hmac {
 	int hash_len;
 };
 
-int crypt_backend_init(struct crypt_device *ctx)
-{
-	if (crypto_backend_initialised)
-		return 0;
+/*
+ * Compatible wrappers for OpenSSL < 1.1.0 and LibreSSL < 2.7.0
+ */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || \
+    (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x2070000fL)
 
+static void openssl_backend_init(void)
+{
 	OpenSSL_add_all_algorithms();
-
-	crypto_backend_initialised = 1;
-	return 0;
 }
 
-uint32_t crypt_backend_flags(void)
-{
-	return 0;
-}
-
-const char *crypt_backend_version(void)
+static const char *openssl_backend_version(void)
 {
 	return SSLeay_version(SSLEAY_VERSION);
 }
 
-/*
- * Compatible wrappers for OpenSSL < 1.1.0
- */
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
 static EVP_MD_CTX *EVP_MD_CTX_new(void)
 {
 	EVP_MD_CTX *md = malloc(sizeof(*md));
@@ -105,7 +96,42 @@ static void HMAC_CTX_free(HMAC_CTX *md)
 	HMAC_CTX_cleanup(md);
 	free(md);
 }
+#else
+static void openssl_backend_init(void)
+{
+}
+
+static const char *openssl_backend_version(void)
+{
+    return OpenSSL_version(OPENSSL_VERSION);
+}
 #endif
+
+int crypt_backend_init(struct crypt_device *ctx)
+{
+	if (crypto_backend_initialised)
+		return 0;
+
+	openssl_backend_init();
+
+	crypto_backend_initialised = 1;
+	return 0;
+}
+
+void crypt_backend_destroy(void)
+{
+	crypto_backend_initialised = 0;
+}
+
+uint32_t crypt_backend_flags(void)
+{
+	return 0;
+}
+
+const char *crypt_backend_version(void)
+{
+	return openssl_backend_version();
+}
 
 /* HASH */
 int crypt_hash_size(const char *name)
@@ -189,12 +215,11 @@ int crypt_hash_final(struct crypt_hash *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hash_destroy(struct crypt_hash *ctx)
+void crypt_hash_destroy(struct crypt_hash *ctx)
 {
 	EVP_MD_CTX_free(ctx->md);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* HMAC */
@@ -204,7 +229,7 @@ int crypt_hmac_size(const char *name)
 }
 
 int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
-		    const void *buffer, size_t length)
+		    const void *key, size_t key_length)
 {
 	struct crypt_hmac *h;
 
@@ -225,7 +250,7 @@ int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
 		return -EINVAL;
 	}
 
-	HMAC_Init_ex(h->md, buffer, length, h->hash_id, NULL);
+	HMAC_Init_ex(h->md, key, key_length, h->hash_id, NULL);
 
 	h->hash_len = EVP_MD_size(h->hash_id);
 	*ctx = h;
@@ -264,20 +289,16 @@ int crypt_hmac_final(struct crypt_hmac *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hmac_destroy(struct crypt_hmac *ctx)
+void crypt_hmac_destroy(struct crypt_hmac *ctx)
 {
 	HMAC_CTX_free(ctx->md);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* RNG */
 int crypt_backend_rng(char *buffer, size_t length, int quality, int fips)
 {
-	if (fips)
-		return -EINVAL;
-
 	if (RAND_bytes((unsigned char *)buffer, length) != 1)
 		return -EINVAL;
 
@@ -289,21 +310,28 @@ int crypt_pbkdf(const char *kdf, const char *hash,
 		const char *password, size_t password_length,
 		const char *salt, size_t salt_length,
 		char *key, size_t key_length,
-		unsigned int iterations)
+		uint32_t iterations, uint32_t memory, uint32_t parallel)
+
 {
 	const EVP_MD *hash_id;
 
-	if (!kdf || strncmp(kdf, "pbkdf2", 6))
+	if (!kdf)
 		return -EINVAL;
 
-	hash_id = EVP_get_digestbyname(hash);
-	if (!hash_id)
-		return -EINVAL;
+	if (!strcmp(kdf, "pbkdf2")) {
+		hash_id = EVP_get_digestbyname(hash);
+		if (!hash_id)
+			return -EINVAL;
 
-	if (!PKCS5_PBKDF2_HMAC(password, (int)password_length,
-	    (const unsigned char *)salt, (int)salt_length,
-            (int)iterations, hash_id, (int)key_length, (unsigned char *)key))
-		return -EINVAL;
+		if (!PKCS5_PBKDF2_HMAC(password, (int)password_length,
+		    (const unsigned char *)salt, (int)salt_length,
+	            (int)iterations, hash_id, (int)key_length, (unsigned char *)key))
+			return -EINVAL;
+		return 0;
+	} else if (!strncmp(kdf, "argon2", 6)) {
+		return argon2(kdf, password, password_length, salt, salt_length,
+			      key, key_length, iterations, memory, parallel);
+	}
 
-	return 0;
+	return -EINVAL;
 }

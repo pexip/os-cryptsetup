@@ -1,8 +1,8 @@
 /*
  * Linux kernel userspace API crypto backend implementation (skcipher)
  *
- * Copyright (C) 2012, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2016, Milan Broz
+ * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <errno.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -44,72 +45,22 @@ struct crypt_cipher {
 	int opfd;
 };
 
-struct cipher_alg {
-	const char *name;
-	int blocksize;
-};
-
-/* FIXME: Getting block size should be dynamic from cipher backend. */
-static struct cipher_alg cipher_algs[] = {
-	{ "cipher_null", 16 },
-	{ "aes",         16 },
-	{ "serpent",     16 },
-	{ "twofish",     16 },
-	{ "anubis",      16 },
-	{ "blowfish",     8 },
-	{ "camellia",    16 },
-	{ "cast5",        8 },
-	{ "cast6",       16 },
-	{ "des",          8 },
-	{ "des3_ede",     8 },
-	{ "khazad",       8 },
-	{ "seed",        16 },
-	{ "tea",          8 },
-	{ "xtea",         8 },
-	{ NULL,           0 }
-};
-
-static struct cipher_alg *_get_alg(const char *name)
-{
-	int i = 0;
-
-	while (name && cipher_algs[i].name) {
-		if (!strcasecmp(name, cipher_algs[i].name))
-			return &cipher_algs[i];
-		i++;
-	}
-	return NULL;
-}
-
-int crypt_cipher_blocksize(const char *name)
-{
-	struct cipher_alg *ca = _get_alg(name);
-
-	return ca ? ca->blocksize : -EINVAL;
-}
-
 /*
  * ciphers
  *
  * ENOENT - algorithm not available
  * ENOTSUP - AF_ALG family not available
- * (but cannot check specificaly for skcipher API)
+ * (but cannot check specifically for skcipher API)
  */
-int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
-		    const char *mode, const void *buffer, size_t length)
+static int _crypt_cipher_init(struct crypt_cipher **ctx,
+			      const void *key, size_t key_length,
+			      struct sockaddr_alg *sa)
 {
 	struct crypt_cipher *h;
-	struct sockaddr_alg sa = {
-		.salg_family = AF_ALG,
-		.salg_type = "skcipher",
-	};
 
 	h = malloc(sizeof(*h));
 	if (!h)
 		return -ENOMEM;
-
-	snprintf((char *)sa.salg_name, sizeof(sa.salg_name),
-		 "%s(%s)", mode, name);
 
 	h->opfd = -1;
 	h->tfmfd = socket(AF_ALG, SOCK_SEQPACKET, 0);
@@ -118,15 +69,12 @@ int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
 		return -ENOTSUP;
 	}
 
-	if (bind(h->tfmfd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+	if (bind(h->tfmfd, (struct sockaddr *)sa, sizeof(*sa)) < 0) {
 		crypt_cipher_destroy(h);
 		return -ENOENT;
 	}
 
-	if (!strcmp(name, "cipher_null"))
-		length = 0;
-
-	if (setsockopt(h->tfmfd, SOL_ALG, ALG_SET_KEY, buffer, length) < 0) {
+	if (setsockopt(h->tfmfd, SOL_ALG, ALG_SET_KEY, key, key_length) < 0) {
 		crypt_cipher_destroy(h);
 		return -EINVAL;
 	}
@@ -139,6 +87,22 @@ int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
 
 	*ctx = h;
 	return 0;
+}
+
+int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
+		      const char *mode, const void *key, size_t key_length)
+{
+	struct sockaddr_alg sa = {
+		.salg_family = AF_ALG,
+		.salg_type = "skcipher",
+	};
+
+	if (!strcmp(name, "cipher_null"))
+		key_length = 0;
+
+	snprintf((char *)sa.salg_name, sizeof(sa.salg_name), "%s(%s)", mode, name);
+
+	return _crypt_cipher_init(ctx, key, key_length, &sa);
 }
 
 /* The in/out should be aligned to page boundary */
@@ -225,7 +189,7 @@ int crypt_cipher_decrypt(struct crypt_cipher *ctx,
 				  iv, iv_length, ALG_OP_DECRYPT);
 }
 
-int crypt_cipher_destroy(struct crypt_cipher *ctx)
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
 {
 	if (ctx->tfmfd >= 0)
 		close(ctx->tfmfd);
@@ -233,25 +197,78 @@ int crypt_cipher_destroy(struct crypt_cipher *ctx)
 		close(ctx->opfd);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
+}
+
+int crypt_cipher_check(const char *name, const char *mode,
+		       const char *integrity, size_t key_length)
+{
+	struct crypt_cipher *c = NULL;
+	char mode_name[64], tmp_salg_name[180], *real_mode = NULL, *cipher_iv = NULL, *key;
+	const char *salg_type;
+	bool aead;
+	int r;
+	struct sockaddr_alg sa = {
+		.salg_family = AF_ALG,
+	};
+
+	aead = integrity && strcmp(integrity, "none");
+
+	/* Remove IV if present */
+	if (mode) {
+		strncpy(mode_name, mode, sizeof(mode_name));
+		mode_name[sizeof(mode_name) - 1] = 0;
+		cipher_iv = strchr(mode_name, '-');
+		if (cipher_iv) {
+			*cipher_iv = '\0';
+			real_mode = mode_name;
+		}
+	}
+
+	salg_type = aead ? "aead" : "skcipher";
+	snprintf((char *)sa.salg_type, sizeof(sa.salg_type), "%s", salg_type);
+	memset(tmp_salg_name, 0, sizeof(tmp_salg_name));
+
+	/* FIXME: this is duplicating a part of devmapper backend */
+	if (aead && !strcmp(integrity, "poly1305"))
+		r = snprintf(tmp_salg_name, sizeof(tmp_salg_name), "rfc7539(%s,%s)", name, integrity);
+	else if (!real_mode)
+		r = snprintf(tmp_salg_name, sizeof(tmp_salg_name), "%s", name);
+	else if (aead && !strcmp(real_mode, "ccm"))
+		r = snprintf(tmp_salg_name, sizeof(tmp_salg_name), "rfc4309(%s(%s))", real_mode, name);
+	else
+		r = snprintf(tmp_salg_name, sizeof(tmp_salg_name), "%s(%s)", real_mode, name);
+
+	if (r <= 0 || r > (int)(sizeof(sa.salg_name) - 1))
+		return -EINVAL;
+
+	memcpy(sa.salg_name, tmp_salg_name, sizeof(sa.salg_name));
+
+	key = malloc(key_length);
+	if (!key)
+		return -ENOMEM;
+
+	/* We cannot use RNG yet, any key works here, tweak the first part if it is split key (XTS). */
+	memset(key, 0xab, key_length);
+	*key = 0xef;
+
+	r = _crypt_cipher_init(&c, key, key_length, &sa);
+	if (c)
+		crypt_cipher_destroy(c);
+	free(key);
+
+	return r;
 }
 
 #else /* ENABLE_AF_ALG */
-
-int crypt_cipher_blocksize(const char *name)
-{
-	return -EINVAL;
-}
-
 int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
 		    const char *mode, const void *buffer, size_t length)
 {
 	return -ENOTSUP;
 }
 
-int crypt_cipher_destroy(struct crypt_cipher *ctx)
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
 {
-	return 0;
+	return;
 }
 
 int crypt_cipher_encrypt(struct crypt_cipher *ctx,
@@ -265,5 +282,10 @@ int crypt_cipher_decrypt(struct crypt_cipher *ctx,
 			 const char *iv, size_t iv_length)
 {
 	return -EINVAL;
+}
+int crypt_cipher_check(const char *name, const char *mode,
+		       const char *integrity, size_t key_length)
+{
+	return 0;
 }
 #endif

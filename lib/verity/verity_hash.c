@@ -1,7 +1,7 @@
 /*
  * dm-verity volume handling
  *
- * Copyright (C) 2012, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -51,12 +51,12 @@ static int verify_zero(struct crypt_device *cd, FILE *wr, size_t bytes)
 	size_t i;
 
 	if (fread(block, bytes, 1, wr) != 1) {
-		log_dbg("EIO while reading spare area.");
+		log_dbg(cd, "EIO while reading spare area.");
 		return -EIO;
 	}
 	for (i = 0; i < bytes; i++)
 		if (block[i]) {
-			log_err(cd, _("Spare area is not zeroed at position %" PRIu64 ".\n"),
+			log_err(cd, _("Spare area is not zeroed at position %" PRIu64 "."),
 				ftello(wr) - bytes);
 			return -EPERM;
 		}
@@ -97,6 +97,45 @@ static int mult_overflow(off_t *u, off_t b, size_t size)
 	return 0;
 }
 
+static int hash_levels(size_t hash_block_size, size_t digest_size,
+		       off_t data_file_blocks, off_t *hash_position, int *levels,
+		       off_t *hash_level_block, off_t *hash_level_size)
+{
+	size_t hash_per_block_bits;
+	off_t s;
+	int i;
+
+	if (!digest_size)
+		return -EINVAL;
+
+	hash_per_block_bits = get_bits_down(hash_block_size / digest_size);
+	if (!hash_per_block_bits)
+		return -EINVAL;
+
+	*levels = 0;
+	while (hash_per_block_bits * *levels < 64 &&
+	       (data_file_blocks - 1) >> (hash_per_block_bits * *levels))
+		(*levels)++;
+
+	if (*levels > VERITY_MAX_LEVELS)
+		return -EINVAL;
+
+	for (i = *levels - 1; i >= 0; i--) {
+		if (hash_level_block)
+			hash_level_block[i] = *hash_position;
+		// verity position of block data_file_blocks at level i
+		s = (data_file_blocks + ((off_t)1 << ((i + 1) * hash_per_block_bits)) - 1) >> ((i + 1) * hash_per_block_bits);
+		if (hash_level_size)
+			hash_level_size[i] = s;
+		if ((*hash_position + s) < *hash_position ||
+		    (*hash_position + s) < 0)
+			return -EINVAL;
+		*hash_position += s;
+	}
+
+	return 0;
+}
+
 static int create_or_verify(struct crypt_device *cd, FILE *rd, FILE *wr,
 				   off_t data_block, size_t data_block_size,
 				   off_t hash_block, size_t hash_block_size,
@@ -118,17 +157,17 @@ static int create_or_verify(struct crypt_device *cd, FILE *rd, FILE *wr,
 
 	if (mult_overflow(&seek_rd, data_block, data_block_size) ||
 	    mult_overflow(&seek_wr, hash_block, hash_block_size)) {
-		log_err(cd, _("Device offset overflow.\n"));
+		log_err(cd, _("Device offset overflow."));
 		return -EINVAL;
 	}
 
 	if (fseeko(rd, seek_rd, SEEK_SET)) {
-		log_dbg("Cannot seek to requested position in data device.");
+		log_dbg(cd, "Cannot seek to requested position in data device.");
 		return -EIO;
 	}
 
 	if (wr && fseeko(wr, seek_wr, SEEK_SET)) {
-		log_dbg("Cannot seek to requested position in hash device.");
+		log_dbg(cd, "Cannot seek to requested position in hash device.");
 		return -EIO;
 	}
 
@@ -140,7 +179,7 @@ static int create_or_verify(struct crypt_device *cd, FILE *rd, FILE *wr,
 				break;
 			blocks--;
 			if (fread(data_buffer, data_block_size, 1, rd) != 1) {
-				log_dbg("Cannot read data device block.");
+				log_dbg(cd, "Cannot read data device block.");
 				return -EIO;
 			}
 
@@ -154,17 +193,17 @@ static int create_or_verify(struct crypt_device *cd, FILE *rd, FILE *wr,
 				break;
 			if (verify) {
 				if (fread(read_digest, digest_size, 1, wr) != 1) {
-					log_dbg("Cannot read digest form hash device.");
+					log_dbg(cd, "Cannot read digest form hash device.");
 					return -EIO;
 				}
 				if (memcmp(read_digest, calculated_digest, digest_size)) {
-					log_err(cd, _("Verification failed at position %" PRIu64 ".\n"),
+					log_err(cd, _("Verification failed at position %" PRIu64 "."),
 						ftello(rd) - data_block_size);
 					return -EPERM;
 				}
 			} else {
 				if (fwrite(calculated_digest, digest_size, 1, wr) != 1) {
-					log_dbg("Cannot write digest to hash device.");
+					log_dbg(cd, "Cannot write digest to hash device.");
 					return -EIO;
 				}
 			}
@@ -177,7 +216,7 @@ static int create_or_verify(struct crypt_device *cd, FILE *rd, FILE *wr,
 						if (r)
 							return r;
 					} else if (fwrite(left_block, digest_size_full - digest_size, 1, wr) != 1) {
-						log_dbg("Cannot write spare area to hash device.");
+						log_dbg(cd, "Cannot write spare area to hash device.");
 						return -EIO;
 					}
 				}
@@ -190,7 +229,7 @@ static int create_or_verify(struct crypt_device *cd, FILE *rd, FILE *wr,
 				if (r)
 					return r;
 			} else if (fwrite(left_block, left_bytes, 1, wr) != 1) {
-				log_dbg("Cannot write remaining spare area to hash device.");
+				log_dbg(cd, "Cannot write remaining spare area to hash device.");
 				return -EIO;
 			}
 		}
@@ -219,20 +258,19 @@ static int VERITY_create_or_verify_hash(struct crypt_device *cd,
 	FILE *hash_file = NULL, *hash_file_2;
 	off_t hash_level_block[VERITY_MAX_LEVELS];
 	off_t hash_level_size[VERITY_MAX_LEVELS];
-	off_t data_file_blocks, s;
-	size_t hash_per_block_bits;
+	off_t data_file_blocks;
 	off_t data_device_size = 0, hash_device_size = 0;
 	uint64_t dev_size;
 	int levels, i, r;
 
-	log_dbg("Hash %s %s, data device %s, data blocks %" PRIu64
+	log_dbg(cd, "Hash %s %s, data device %s, data blocks %" PRIu64
 		", hash_device %s, offset %" PRIu64 ".",
 		verify ? "verification" : "creation", hash_name,
 		device_path(data_device), data_blocks,
 		device_path(hash_device), hash_position);
 
 	if (data_blocks < 0 || hash_position < 0) {
-		log_err(cd, _("Invalid size parameters for verity device.\n"));
+		log_err(cd, _("Invalid size parameters for verity device."));
 		return -EINVAL;
 	}
 
@@ -246,61 +284,39 @@ static int VERITY_create_or_verify_hash(struct crypt_device *cd,
 		data_file_blocks = data_blocks;
 
 	if (mult_overflow(&data_device_size, data_blocks, data_block_size)) {
-		log_err(cd, _("Device offset overflow.\n"));
+		log_err(cd, _("Device offset overflow."));
 		return -EINVAL;
 	}
 
-	hash_per_block_bits = get_bits_down(hash_block_size / digest_size);
-	if (!hash_per_block_bits)
-		return -EINVAL;
-
-	levels = 0;
-	if (data_file_blocks) {
-		while (hash_per_block_bits * levels < 64 &&
-		       (data_file_blocks - 1) >> (hash_per_block_bits * levels))
-			levels++;
-	}
-	log_dbg("Using %d hash levels.", levels);
-
-	if (levels > VERITY_MAX_LEVELS) {
-		log_err(cd, _("Too many tree levels for verity volume.\n"));
+	if (hash_levels(hash_block_size, digest_size, data_file_blocks, &hash_position,
+		&levels, &hash_level_block[0], &hash_level_size[0])) {
+		log_err(cd, _("Hash area overflow."));
 		return -EINVAL;
 	}
 
-	for (i = levels - 1; i >= 0; i--) {
-		hash_level_block[i] = hash_position;
-		// verity position of block data_file_blocks at level i
-		s = (data_file_blocks + ((off_t)1 << ((i + 1) * hash_per_block_bits)) - 1) >> ((i + 1) * hash_per_block_bits);
-		hash_level_size[i] = s;
-		if ((hash_position + s) < hash_position ||
-		    (hash_position + s) < 0) {
-			log_err(cd, _("Device offset overflow.\n"));
-			return -EINVAL;
-		}
-		hash_position += s;
-	}
+	log_dbg(cd, "Using %d hash levels.", levels);
 
 	if (mult_overflow(&hash_device_size, hash_position, hash_block_size)) {
-		log_err(cd, _("Device offset overflow.\n"));
+		log_err(cd, _("Device offset overflow."));
 		return -EINVAL;
 	}
 
-	log_dbg("Data device size required: %" PRIu64 " bytes.",
+	log_dbg(cd, "Data device size required: %" PRIu64 " bytes.",
 		data_device_size);
 	data_file = fopen(device_path(data_device), "r");
 	if (!data_file) {
-		log_err(cd, _("Cannot open device %s.\n"),
+		log_err(cd, _("Cannot open device %s."),
 			device_path(data_device)
 		);
 		r = -EIO;
 		goto out;
 	}
 
-	log_dbg("Hash device size required: %" PRIu64 " bytes.",
+	log_dbg(cd, "Hash device size required: %" PRIu64 " bytes.",
 		hash_device_size);
 	hash_file = fopen(device_path(hash_device), verify ? "r" : "r+");
 	if (!hash_file) {
-		log_err(cd, _("Cannot open device %s.\n"),
+		log_err(cd, _("Cannot open device %s."),
 			device_path(hash_device));
 		r = -EIO;
 		goto out;
@@ -320,7 +336,7 @@ static int VERITY_create_or_verify_hash(struct crypt_device *cd,
 		} else {
 			hash_file_2 = fopen(device_path(hash_device), "r");
 			if (!hash_file_2) {
-				log_err(cd, _("Cannot open device %s.\n"),
+				log_err(cd, _("Cannot open device %s."),
 					device_path(hash_device));
 				r = -EIO;
 				goto out;
@@ -351,20 +367,20 @@ static int VERITY_create_or_verify_hash(struct crypt_device *cd,
 out:
 	if (verify) {
 		if (r)
-			log_err(cd, _("Verification of data area failed.\n"));
+			log_err(cd, _("Verification of data area failed."));
 		else {
-			log_dbg("Verification of data area succeeded.");
+			log_dbg(cd, "Verification of data area succeeded.");
 			r = memcmp(root_hash, calculated_digest, digest_size) ? -EPERM : 0;
 			if (r)
-				log_err(cd, _("Verification of root hash failed.\n"));
+				log_err(cd, _("Verification of root hash failed."));
 			else
-				log_dbg("Verification of root hash succeeded.");
+				log_dbg(cd, "Verification of root hash succeeded.");
 		}
 	} else {
 		if (r == -EIO)
-			log_err(cd, _("Input/output error while creating hash area.\n"));
+			log_err(cd, _("Input/output error while creating hash area."));
 		else if (r)
-			log_err(cd, _("Creation of hash area failed.\n"));
+			log_err(cd, _("Creation of hash area failed."));
 		else {
 			fsync(fileno(hash_file));
 			memcpy(root_hash, calculated_digest, digest_size);
@@ -405,14 +421,14 @@ int VERITY_create(struct crypt_device *cd,
 		  char *root_hash,
 		  size_t root_hash_size)
 {
-	unsigned pgsize = crypt_getpagesize();
+	unsigned pgsize = (unsigned)crypt_getpagesize();
 
 	if (verity_hdr->salt_size > 256)
 		return -EINVAL;
 
 	if (verity_hdr->data_block_size > pgsize)
 		log_err(cd, _("WARNING: Kernel cannot activate device if data "
-			      "block size exceeds page size (%u).\n"), pgsize);
+			      "block size exceeds page size (%u)."), pgsize);
 
 	return VERITY_create_or_verify_hash(cd, 0,
 		verity_hdr->hash_type,
@@ -427,4 +443,16 @@ int VERITY_create(struct crypt_device *cd,
 		root_hash_size,
 		verity_hdr->salt,
 		verity_hdr->salt_size);
+}
+
+uint64_t VERITY_hash_blocks(struct crypt_device *cd, struct crypt_params_verity *params)
+{
+	off_t hash_position = 0;
+	int levels = 0;
+
+	if (hash_levels(params->hash_block_size, crypt_get_volume_key_size(cd),
+		params->data_size, &hash_position, &levels, NULL, NULL))
+		return 0;
+
+	return (uint64_t)hash_position;
 }
