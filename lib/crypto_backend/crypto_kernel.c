@@ -1,8 +1,8 @@
 /*
  * Linux kernel userspace API crypto backend implementation
  *
- * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2019 Milan Broz
+ * Copyright (C) 2010-2021 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2021 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,7 +27,7 @@
 #include <sys/socket.h>
 #include <sys/utsname.h>
 #include <linux/if_alg.h>
-#include "crypto_backend.h"
+#include "crypto_backend_internal.h"
 
 /* FIXME: remove later */
 #ifndef AF_ALG
@@ -62,6 +62,14 @@ static struct hash_alg hash_algs[] = {
 	{ "stribog256","streebog256", 32,  64 },
 	{ "stribog512","streebog512", 64,  64 },
 	{ "sm3",       "sm3",         32,  64 },
+	{ "blake2b-160","blake2b-160",20, 128 },
+	{ "blake2b-256","blake2b-256",32, 128 },
+	{ "blake2b-384","blake2b-384",48, 128 },
+	{ "blake2b-512","blake2b-512",64, 128 },
+	{ "blake2s-128","blake2s-128",16,  64 },
+	{ "blake2s-160","blake2s-160",20,  64 },
+	{ "blake2s-224","blake2s-224",28,  64 },
+	{ "blake2s-256","blake2s-256",32,  64 },
 	{ NULL,        NULL,           0,   0 }
 };
 
@@ -75,6 +83,10 @@ struct crypt_hmac {
 	int tfmfd;
 	int opfd;
 	int hash_len;
+};
+
+struct crypt_cipher {
+	struct crypt_cipher_kernel ck;
 };
 
 static int crypt_kernel_socket_init(struct sockaddr_alg *sa, int *tfmfd, int *opfd,
@@ -106,7 +118,7 @@ static int crypt_kernel_socket_init(struct sockaddr_alg *sa, int *tfmfd, int *op
 	return 0;
 }
 
-int crypt_backend_init(struct crypt_device *ctx)
+int crypt_backend_init(void)
 {
 	struct utsname uts;
 	struct sockaddr_alg sa = {
@@ -114,7 +126,7 @@ int crypt_backend_init(struct crypt_device *ctx)
 		.salg_type = "hash",
 		.salg_name = "sha256",
 	};
-	int tfmfd = -1, opfd = -1;
+	int r, tfmfd = -1, opfd = -1;
 
 	if (crypto_backend_initialised)
 		return 0;
@@ -122,14 +134,16 @@ int crypt_backend_init(struct crypt_device *ctx)
 	if (uname(&uts) == -1 || strcmp(uts.sysname, "Linux"))
 		return -EINVAL;
 
+	r = snprintf(version, sizeof(version), "%s %s kernel cryptoAPI",
+		uts.sysname, uts.release);
+	if (r < 0 || (size_t)r >= sizeof(version))
+		return -EINVAL;
+
 	if (crypt_kernel_socket_init(&sa, &tfmfd, &opfd, NULL, 0) < 0)
 		return -EINVAL;
 
 	close(tfmfd);
 	close(opfd);
-
-	snprintf(version, sizeof(version), "%s %s kernel cryptoAPI",
-		 uts.sysname, uts.release);
 
 	crypto_backend_initialised = 1;
 	return 0;
@@ -251,6 +265,7 @@ int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
 		.salg_family = AF_ALG,
 		.salg_type = "hash",
 	};
+	int r;
 
 	h = malloc(sizeof(*h));
 	if (!h)
@@ -263,8 +278,12 @@ int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
 	}
 	h->hash_len = ha->length;
 
-	snprintf((char *)sa.salg_name, sizeof(sa.salg_name),
+	r = snprintf((char *)sa.salg_name, sizeof(sa.salg_name),
 		 "hmac(%s)", ha->kernel_name);
+	if (r < 0 || (size_t)r >= sizeof(sa.salg_name)) {
+		free(h);
+		return -EINVAL;
+	}
 
 	if (crypt_kernel_socket_init(&sa, &h->tfmfd, &h->opfd, key, key_length) < 0) {
 		free(h);
@@ -341,4 +360,59 @@ int crypt_pbkdf(const char *kdf, const char *hash,
 	}
 
 	return -EINVAL;
+}
+
+/* Block ciphers */
+int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
+		    const char *mode, const void *key, size_t key_length)
+{
+	struct crypt_cipher *h;
+	int r;
+
+	h = malloc(sizeof(*h));
+	if (!h)
+		return -ENOMEM;
+
+	r = crypt_cipher_init_kernel(&h->ck, name, mode, key, key_length);
+	if (r < 0) {
+		free(h);
+		return r;
+	}
+
+	*ctx = h;
+	return 0;
+}
+
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
+{
+	crypt_cipher_destroy_kernel(&ctx->ck);
+	free(ctx);
+}
+
+int crypt_cipher_encrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	return crypt_cipher_encrypt_kernel(&ctx->ck, in, out, length, iv, iv_length);
+}
+
+int crypt_cipher_decrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	return crypt_cipher_decrypt_kernel(&ctx->ck, in, out, length, iv, iv_length);
+}
+
+bool crypt_cipher_kernel_only(struct crypt_cipher *ctx)
+{
+	return true;
+}
+
+int crypt_bitlk_decrypt_key(const void *key, size_t key_length,
+			    const char *in, char *out, size_t length,
+			    const char *iv, size_t iv_length,
+			    const char *tag, size_t tag_length)
+{
+	return crypt_bitlk_decrypt_key_kernel(key, key_length, in, out, length,
+					      iv, iv_length, tag, tag_length);
 }

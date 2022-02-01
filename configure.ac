@@ -1,9 +1,9 @@
 AC_PREREQ([2.67])
-AC_INIT([cryptsetup],[2.1.0])
+AC_INIT([cryptsetup],[2.3.7])
 
 dnl library version from <major>.<minor>.<release>[-<suffix>]
 LIBCRYPTSETUP_VERSION=$(echo $PACKAGE_VERSION | cut -f1 -d-)
-LIBCRYPTSETUP_VERSION_INFO=16:0:4
+LIBCRYPTSETUP_VERSION_INFO=18:0:6
 
 AM_SILENT_RULES([yes])
 AC_CONFIG_SRCDIR(src/cryptsetup.c)
@@ -33,6 +33,7 @@ AC_PROG_MAKE_SET
 AC_ENABLE_STATIC(no)
 LT_INIT
 PKG_PROG_PKG_CONFIG
+AM_ICONV
 
 dnl ==========================================================================
 dnl define PKG_CHECK_VAR for old pkg-config <= 0.28
@@ -56,9 +57,14 @@ dnl ==========================================================================
 AC_C_RESTRICT
 
 AC_HEADER_DIRENT
-AC_HEADER_STDC
 AC_CHECK_HEADERS(fcntl.h malloc.h inttypes.h sys/ioctl.h sys/mman.h \
 	sys/sysmacros.h sys/statvfs.h ctype.h unistd.h locale.h byteswap.h endian.h stdint.h)
+AC_CHECK_DECLS([O_CLOEXEC],,[AC_DEFINE([O_CLOEXEC],[0], [Defined to 0 if not provided])],
+[[
+#ifdef HAVE_FCNTL_H
+# include <fcntl.h>
+#endif
+]])
 
 AC_CHECK_HEADERS(uuid/uuid.h,,[AC_MSG_ERROR([You need the uuid library.])])
 AC_CHECK_HEADER(libdevmapper.h,,[AC_MSG_ERROR([You need the device-mapper library.])])
@@ -139,6 +145,14 @@ AC_DEFUN([NO_FIPS], [
 	fi
 ])
 
+dnl LUKS2 online reencryption
+AC_ARG_ENABLE([luks2-reencryption],
+	AS_HELP_STRING([--disable-luks2-reencryption], [disable LUKS2 online reencryption extension]),
+	[], [enable_luks2_reencryption=yes])
+if test "x$enable_luks2_reencryption" = "xyes"; then
+	AC_DEFINE(USE_LUKS2_REENCRYPTION, 1, [Use LUKS2 online reencryption extension])
+fi
+
 dnl ==========================================================================
 dnl pwquality library (cryptsetup CLI only)
 AC_ARG_ENABLE([pwquality],
@@ -169,7 +183,15 @@ AC_DEFINE_UNQUOTED([PASSWDQC_CONFIG_FILE], ["$use_passwdqc_config"], [passwdqc l
 if test "x$enable_passwdqc" = "xyes"; then
 	AC_DEFINE(ENABLE_PASSWDQC, 1, [Enable password quality checking using passwdqc library])
 
-	PASSWDQC_LIBS="-lpasswdqc"
+	saved_LIBS="$LIBS"
+	AC_SEARCH_LIBS([passwdqc_check], [passwdqc])
+	case "$ac_cv_search_passwdqc_check" in
+		no) AC_MSG_ERROR([failed to find passwdqc_check]) ;;
+		-l*) PASSWDQC_LIBS="$ac_cv_search_passwdqc_check" ;;
+		*) PASSWDQC_LIBS= ;;
+	esac
+	AC_CHECK_FUNCS([passwdqc_params_free])
+	LIBS="$saved_LIBS"
 fi
 
 if test "x$enable_pwquality$enable_passwdqc" = "xyesyes"; then
@@ -208,6 +230,8 @@ AC_DEFUN([CONFIGURE_GCRYPT], [
 		AC_MSG_RESULT([yes])
 		NO_FIPS([])
 	fi
+
+	AC_CHECK_DECLS([GCRY_CIPHER_MODE_XTS], [], [], [#include <gcrypt.h>])
 
 	if test "x$enable_static_cryptsetup" = "xyes"; then
 		saved_LIBS=$LIBS
@@ -346,6 +370,8 @@ AC_CHECK_DECLS([dm_task_retry_remove], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([dm_task_deferred_remove], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([dm_device_has_mounted_fs], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([dm_device_has_holders], [], [], [#include <libdevmapper.h>])
+AC_CHECK_DECLS([dm_device_get_name], [], [], [#include <libdevmapper.h>])
+AC_CHECK_DECLS([DM_DEVICE_GET_TARGET_VERSION], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([DM_UDEV_DISABLE_DISK_RULES_FLAG], [have_cookie=yes], [have_cookie=no], [#include <libdevmapper.h>])
 if test "x$enable_udev" = xyes; then
 	if test "x$have_cookie" = xno; then
@@ -359,6 +385,7 @@ LIBS=$saved_LIBS
 dnl Check for JSON-C used in LUKS2
 PKG_CHECK_MODULES([JSON_C], [json-c])
 AC_CHECK_DECLS([json_object_object_add_ex], [], [], [#include <json-c/json.h>])
+AC_CHECK_DECLS([json_object_deep_copy], [], [], [#include <json-c/json.h>])
 
 dnl Crypto backend configuration.
 AC_ARG_WITH([crypto_backend],
@@ -584,7 +611,8 @@ CS_STR_WITH([loopaes-cipher], [cipher for loop-AES mode], [aes])
 CS_NUM_WITH([loopaes-keybits],[key length in bits for loop-AES mode], [256])
 
 CS_NUM_WITH([keyfile-size-maxkb],[maximum keyfile size (in KiB)], [8192])
-CS_NUM_WITH([passphrase-size-max],[maximum keyfile size (in characters)], [512])
+CS_NUM_WITH([integrity-keyfile-size-maxkb],[maximum integritysetup keyfile size (in KiB)], [4])
+CS_NUM_WITH([passphrase-size-max],[maximum passphrase size (in characters)], [512])
 
 CS_STR_WITH([verity-hash],       [hash function for verity mode], [sha256])
 CS_NUM_WITH([verity-data-block], [data block size for verity mode], [4096])

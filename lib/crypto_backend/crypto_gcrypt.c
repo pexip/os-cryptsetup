@@ -1,8 +1,8 @@
 /*
  * GCRYPT crypto backend implementation
  *
- * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2019 Milan Broz
+ * Copyright (C) 2010-2021 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2021 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,7 +24,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <gcrypt.h>
-#include "crypto_backend.h"
+#include "crypto_backend_internal.h"
 
 static int crypto_backend_initialised = 0;
 static int crypto_backend_secmem = 1;
@@ -43,9 +43,22 @@ struct crypt_hmac {
 	int hash_len;
 };
 
+struct crypt_cipher {
+	bool use_kernel;
+	union {
+	struct crypt_cipher_kernel kernel;
+	gcry_cipher_hd_t hd;
+	} u;
+};
+
+struct hash_alg {
+	const char *name;
+	const char *gcrypt_name;
+};
+
 /*
  * Test for wrong Whirlpool variant,
- * Ref: http://lists.gnupg.org/pipermail/gcrypt-devel/2014-January/002889.html
+ * Ref: https://lists.gnupg.org/pipermail/gcrypt-devel/2014-January/002889.html
  */
 static void crypt_hash_test_whirlpool_bug(void)
 {
@@ -81,8 +94,10 @@ static void crypt_hash_test_whirlpool_bug(void)
 		crypto_backend_whirlpool_bug = 1;
 }
 
-int crypt_backend_init(struct crypt_device *ctx)
+int crypt_backend_init(void)
 {
+	int r;
+
 	if (crypto_backend_initialised)
 		return 0;
 
@@ -112,11 +127,12 @@ int crypt_backend_init(struct crypt_device *ctx)
 	crypto_backend_initialised = 1;
 	crypt_hash_test_whirlpool_bug();
 
-	snprintf(version, 64, "gcrypt %s%s%s",
+	r = snprintf(version, sizeof(version), "gcrypt %s%s%s",
 		 gcry_check_version(NULL),
 		 crypto_backend_secmem ? "" : ", secmem disabled",
-		 crypto_backend_whirlpool_bug > 0 ? ", flawed whirlpool" : ""
-		);
+		 crypto_backend_whirlpool_bug > 0 ? ", flawed whirlpool" : "");
+	if (r < 0 || (size_t)r >= sizeof(version))
+		return -EINVAL;
 
 	return 0;
 }
@@ -142,15 +158,38 @@ uint32_t crypt_backend_flags(void)
 static const char *crypt_hash_compat_name(const char *name, unsigned int *flags)
 {
 	const char *hash_name = name;
+	int i;
+	static struct hash_alg hash_algs[] = {
+	{ "blake2b-160", "blake2b_160" },
+	{ "blake2b-256", "blake2b_256" },
+	{ "blake2b-384", "blake2b_384" },
+	{ "blake2b-512", "blake2b_512" },
+	{ "blake2s-128", "blake2s_128" },
+	{ "blake2s-160", "blake2s_160" },
+	{ "blake2s-224", "blake2s_224" },
+	{ "blake2s-256", "blake2s_256" },
+	{ NULL,          NULL,         }};
+
+	if (!name)
+		return NULL;
 
 	/* "whirlpool_gcryptbug" is out shortcut to flawed whirlpool
 	 * in libgcrypt < 1.6.0 */
-	if (name && !strcasecmp(name, "whirlpool_gcryptbug")) {
+	if (!strcasecmp(name, "whirlpool_gcryptbug")) {
 #if GCRYPT_VERSION_NUMBER >= 0x010601
 		if (flags)
 			*flags |= GCRY_MD_FLAG_BUGEMU1;
 #endif
 		hash_name = "whirlpool";
+	}
+
+	i = 0;
+	while (hash_algs[i].name) {
+		if (!strcasecmp(name, hash_algs[i].name)) {
+			hash_name =  hash_algs[i].gcrypt_name;
+			break;
+		}
+		i++;
 	}
 
 	return hash_name;
@@ -365,4 +404,149 @@ int crypt_pbkdf(const char *kdf, const char *hash,
 		return argon2(kdf, password, password_length, salt, salt_length,
 			      key, key_length, iterations, memory, parallel);
 	return -EINVAL;
+}
+
+/* Block ciphers */
+static int _cipher_init(gcry_cipher_hd_t *hd, const char *name,
+			const char *mode, const void *buffer, size_t length)
+{
+	int cipher_id, mode_id;
+
+	cipher_id = gcry_cipher_map_name(name);
+	if (cipher_id == GCRY_CIPHER_MODE_NONE)
+		return -ENOENT;
+
+	if (!strcmp(mode, "ecb"))
+		mode_id = GCRY_CIPHER_MODE_ECB;
+	else if (!strcmp(mode, "cbc"))
+		mode_id = GCRY_CIPHER_MODE_CBC;
+#if HAVE_DECL_GCRY_CIPHER_MODE_XTS
+	else if (!strcmp(mode, "xts"))
+		mode_id = GCRY_CIPHER_MODE_XTS;
+#endif
+	else
+		return -ENOENT;
+
+	if (gcry_cipher_open(hd, cipher_id, mode_id, 0))
+		return -EINVAL;
+
+	if (gcry_cipher_setkey(*hd, buffer, length)) {
+		gcry_cipher_close(*hd);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
+		    const char *mode, const void *key, size_t key_length)
+{
+	struct crypt_cipher *h;
+	int r;
+
+	h = malloc(sizeof(*h));
+	if (!h)
+		return -ENOMEM;
+
+	if (!_cipher_init(&h->u.hd, name, mode, key, key_length)) {
+		h->use_kernel = false;
+		*ctx = h;
+		return 0;
+	}
+
+	r = crypt_cipher_init_kernel(&h->u.kernel, name, mode, key, key_length);
+	if (r < 0) {
+		free(h);
+		return r;
+	}
+
+	h->use_kernel = true;
+	*ctx = h;
+	return 0;
+}
+
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
+{
+	if (ctx->use_kernel)
+		crypt_cipher_destroy_kernel(&ctx->u.kernel);
+	else
+		gcry_cipher_close(ctx->u.hd);
+	free(ctx);
+}
+
+int crypt_cipher_encrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	if (ctx->use_kernel)
+		return crypt_cipher_encrypt_kernel(&ctx->u.kernel, in, out, length, iv, iv_length);
+
+	if (iv && gcry_cipher_setiv(ctx->u.hd, iv, iv_length))
+		return -EINVAL;
+
+	if (gcry_cipher_encrypt(ctx->u.hd, out, length, in, length))
+		return -EINVAL;
+
+	return 0;
+}
+
+int crypt_cipher_decrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	if (ctx->use_kernel)
+		return crypt_cipher_decrypt_kernel(&ctx->u.kernel, in, out, length, iv, iv_length);
+
+	if (iv && gcry_cipher_setiv(ctx->u.hd, iv, iv_length))
+		return -EINVAL;
+
+	if (gcry_cipher_decrypt(ctx->u.hd, out, length, in, length))
+		return -EINVAL;
+
+	return 0;
+}
+
+bool crypt_cipher_kernel_only(struct crypt_cipher *ctx)
+{
+	return ctx->use_kernel;
+}
+
+int crypt_bitlk_decrypt_key(const void *key, size_t key_length,
+			    const char *in, char *out, size_t length,
+			    const char *iv, size_t iv_length,
+			    const char *tag, size_t tag_length)
+{
+#ifdef GCRY_CCM_BLOCK_LEN
+	gcry_cipher_hd_t hd;
+	uint64_t l[3];
+	int r = -EINVAL;
+
+	if (gcry_cipher_open(&hd, GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CCM, 0))
+		return -EINVAL;
+
+	if (gcry_cipher_setkey(hd, key, key_length))
+		goto out;
+
+	if (gcry_cipher_setiv(hd, iv, iv_length))
+		goto out;
+
+	l[0] = length;
+	l[1] = 0;
+	l[2] = tag_length;
+	if (gcry_cipher_ctl(hd, GCRYCTL_SET_CCM_LENGTHS, l, sizeof(l)))
+		goto out;
+
+	if (gcry_cipher_decrypt(hd, out, length, in, length))
+		goto out;
+
+	if (gcry_cipher_checktag(hd, tag, tag_length))
+		goto out;
+
+	r = 0;
+out:
+	gcry_cipher_close(hd);
+	return r;
+#else
+	return -ENOTSUP;
+#endif
 }

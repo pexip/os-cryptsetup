@@ -1,7 +1,9 @@
 #!/bin/bash
 
 PS4='$LINENO:'
-CRYPTSETUP=../cryptsetup
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
+CRYPTSETUP_RAW=$CRYPTSETUP
 
 CRYPTSETUP_VALGRIND=../.libs/cryptsetup
 CRYPTSETUP_LIB_VALGRIND=../.libs
@@ -46,11 +48,13 @@ LOOPDEV=$(losetup -f 2>/dev/null)
 
 function remove_mapping()
 {
-	[ -b /dev/mapper/$DEV_NAME3 ] && dmsetup remove $DEV_NAME3 >/dev/null 2>&1
-	[ -b /dev/mapper/$DEV_NAME2 ] && dmsetup remove $DEV_NAME2 >/dev/null 2>&1
-	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME >/dev/null 2>&1
+	[ -b /dev/mapper/$DEV_NAME3 ] && dmsetup remove --retry $DEV_NAME3 >/dev/null 2>&1
+	[ -b /dev/mapper/$DEV_NAME2 ] && dmsetup remove --retry $DEV_NAME2 >/dev/null 2>&1
+	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove --retry $DEV_NAME >/dev/null 2>&1
 	losetup -d $LOOPDEV >/dev/null 2>&1
 	rm -f $ORIG_IMG $IMG $IMG10 $KEY1 $KEY2 $KEY5 $KEYE $HEADER_IMG $VK_FILE missing-file >/dev/null 2>&1
+	rmmod scsi_debug 2> /dev/null
+	scsi_debug_teardown $DEV
 }
 
 function force_uevent()
@@ -63,7 +67,8 @@ function fail()
 {
 	[ -n "$1" ] && echo "$1"
 	remove_mapping
-	echo "FAILED at line $(caller)"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
 	exit 2
 }
 
@@ -88,7 +93,7 @@ function skip()
 
 function prepare()
 {
-	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME >/dev/null 2>&1
+	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove --retry $DEV_NAME >/dev/null 2>&1
 
 	case "$2" in
 	file)
@@ -155,21 +160,58 @@ function check_exists()
 	check $1
 }
 
+# $1 path to scsi debug bdev
+scsi_debug_teardown() {
+	local _tries=15;
+
+	while [ -b "$1" -a $_tries -gt 0 ]; do
+		rmmod scsi_debug 2> /dev/null
+		if [ -b "$1" ]; then
+			sleep .1
+			_tries=$((_tries-1))
+		fi
+	done
+
+	test ! -b "$1" || rmmod scsi_debug 2> /dev/null
+}
+
+function add_scsi_device() {
+	scsi_debug_teardown $DEV
+        modprobe scsi_debug $@ delay=0
+        if [ $? -ne 0 ] ; then
+                echo "This kernel seems to not support proper scsi_debug module, test skipped."
+                exit 77
+        fi
+
+        sleep 1
+        DEV="/dev/"$(grep -l -e scsi_debug /sys/block/*/device/model | cut -f4 -d /)
+        [ -b $DEV ] || fail "Cannot find $DEV."
+}
+
 function valgrind_setup()
 {
+	[ -n "$VALG" ] || return
 	which valgrind >/dev/null 2>&1 || fail "Cannot find valgrind."
 	[ ! -f $CRYPTSETUP_VALGRIND ] && fail "Unable to get location of cryptsetup executable."
 	export LD_LIBRARY_PATH="$CRYPTSETUP_LIB_VALGRIND:$LD_LIBRARY_PATH"
+	CRYPTSETUP=valgrind_run
+	CRYPTSETUP_RAW="./valg.sh ${CRYPTSETUP_VALGRIND}"
 }
 
 function valgrind_run()
 {
-	INFOSTRING="$(basename ${BASH_SOURCE[1]})-line-${BASH_LINENO[0]}" ./valg.sh ${CRYPTSETUP_VALGRIND} "$@"
+	export INFOSTRING="$(basename ${BASH_SOURCE[1]})-line-${BASH_LINENO[0]}"
+	$CRYPTSETUP_RAW "$@"
+}
+
+function expect_run()
+{
+	export INFOSTRING="$(basename ${BASH_SOURCE[1]})-line-${BASH_LINENO[0]}"
+	expect "$@"
 }
 
 export LANG=C
-
-[ -n "$VALG" ] && valgrind_setup && CRYPTSETUP=valgrind_run
+valgrind_setup
 
 # LUKS non-root-tests
 if [ $(id -u) != 0 ]; then
@@ -184,6 +226,10 @@ echo "[2] open"
 echo $PWD0 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
 [ $? -ne 2 ] && fail "luksOpen should return EPERM exit code"
 echo $PWD1 | $CRYPTSETUP luksOpen $IMG --test-passphrase || fail
+# test detached header --test-passphrase
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT --header $HEADER_IMG $IMG || fail
+echo $PWD1 | $CRYPTSETUP open --test-passphrase $HEADER_IMG || fail
+rm -f $HEADER_IMG
 echo "[3] add key"
 echo $PWD1 | $CRYPTSETUP luksAddKey $IMG $FAST_PBKDF_OPT 2>/dev/null && fail
 echo -e "$PWD1\n$PWD2" | $CRYPTSETUP luksAddKey $IMG $FAST_PBKDF_OPT || fail
@@ -200,9 +246,9 @@ echo $PWD0 | $CRYPTSETUP luksRemoveKey $IMG || fail
 echo $PWD2 | $CRYPTSETUP luksRemoveKey $IMG || fail
 # check if keys were deleted
 echo $PWD0 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
-[ $? -ne 2 ] && fail "luksOpen should return EPERM exit code"
+[ $? -ne 1 ] && fail "luksOpen should return ENOENT exit code"
 echo $PWD2 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
-[ $? -ne 2 ] && fail "luksOpen should return EPERM exit code"
+[ $? -ne 1 ] && fail "luksOpen should return ENOENT exit code"
 echo "[6] kill slot"
 # format new luks device with active keys PWD1, PWD2
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $IMG $FAST_PBKDF_OPT || fail
@@ -235,13 +281,12 @@ echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT $IMG -d $KEY1 || fail
 $CRYPTSETUP luksDump $IMG | grep -q "Key Slot 0: ENABLED" || fail
 $CRYPTSETUP luksDump $IMG | grep -q $TEST_UUID || fail
 echo $PWDW | $CRYPTSETUP luksDump $IMG --dump-master-key 2>/dev/null && fail
-echo $PWD1 | $CRYPTSETUP luksDump $IMG --dump-master-key | grep -q "MK dump:" || can_fail_fips
-$CRYPTSETUP luksDump -q $IMG --dump-master-key -d $KEY1 | grep -q "MK dump:" || can_fail_fips
-echo $PWD1 | $CRYPTSETUP luksDump -q $IMG --dump-master-key --master-key-file $VK_FILE >/dev/null || can_fail_fips
+echo $PWD1 | $CRYPTSETUP luksDump $IMG --dump-master-key | grep -q "MK dump:" || fail
+$CRYPTSETUP luksDump -q $IMG --dump-master-key -d $KEY1 | grep -q "MK dump:" || fail
+echo $PWD1 | $CRYPTSETUP luksDump -q $IMG --dump-master-key --master-key-file $VK_FILE >/dev/null || fail
 echo $PWD1 | $CRYPTSETUP luksDump -q $IMG --dump-master-key --master-key-file $VK_FILE 2>/dev/null && fail
-fips_mode || {
-	echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT --master-key-file $VK_FILE $IMG || fail
-}
+echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT --master-key-file $VK_FILE $IMG || fail
+
 echo "[10] uuid"
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT --uuid $TEST_UUID $IMG || fail
 $CRYPTSETUP -q luksUUID $IMG | grep -q $TEST_UUID || fail
@@ -483,6 +528,12 @@ $CRYPTSETUP -q resize  $DEV_NAME --size 100 || fail
 $CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "100 sectors" || fail
 $CRYPTSETUP -q resize  $DEV_NAME || fail
 $CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "19997 sectors" || fail
+$CRYPTSETUP -q resize  $DEV_NAME --device-size 1M || fail
+$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "2048 sectors" || fail
+$CRYPTSETUP -q resize  $DEV_NAME --device-size 512k --size 1023 >/dev/null 2>&1 && fail
+$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "2048 sectors" || fail
+$CRYPTSETUP -q resize  $DEV_NAME --device-size 513 >/dev/null 2>&1 && fail
+$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "2048 sectors" || fail
 # Resize underlying loop device as well
 truncate -s 16M $IMG || fail
 $CRYPTSETUP -q resize  $DEV_NAME || fail
@@ -499,12 +550,27 @@ $CRYPTSETUP -q remove  $DEV_NAME || fail
 # 4k sector resize (if kernel supports it)
 echo $PWD1 | $CRYPTSETUP -q open --type plain $LOOPDEV $DEV_NAME --sector-size 4096 --size 8  >/dev/null 2>&1
 if [ $? -eq 0 ] ; then
-	$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "8 sectors"
+	$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "8 sectors" || fail
 	$CRYPTSETUP -q resize  $DEV_NAME --size 16 || fail
-	$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "16 sectors"
+	$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "16 sectors" || fail
 	$CRYPTSETUP -q resize  $DEV_NAME --size 9 2>/dev/null && fail
+	$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "16 sectors" || fail
+	$CRYPTSETUP -q resize  $DEV_NAME --device-size 4608 2>/dev/null && fail
+	$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "16 sectors" || fail
 	$CRYPTSETUP -q remove  $DEV_NAME || fail
 fi
+# Resize not aligned to logical block size
+add_scsi_device dev_size_mb=32 sector_size=4096
+echo $PWD1 | $CRYPTSETUP create $DEV_NAME --hash sha1 $DEV || fail
+OLD_SIZE=$($CRYPTSETUP status $DEV_NAME | grep "^ \+size:" | sed 's/.* \([0-9]\+\) .*/\1/')
+$CRYPTSETUP resize $DEV_NAME -b 7 2> /dev/null && fail
+dmsetup info $DEV_NAME | grep -q SUSPENDED && fail
+NEW_SIZE=$($CRYPTSETUP status $DEV_NAME | grep "^ \+size:" | sed 's/.* \([0-9]\+\) .*/\1/')
+test $OLD_SIZE -eq $NEW_SIZE || fail
+$CRYPTSETUP close $DEV_NAME || fail
+# Add check for unaligned plain crypt activation
+echo $PWD1 | $CRYPTSETUP create $DEV_NAME --hash sha1 $DEV -b 7 2>/dev/null && fail
+$CRYPTSETUP status $DEV_NAME >/dev/null 2>&1 && fail
 # verify is ignored on non-tty input
 echo $PWD1 | $CRYPTSETUP create $DEV_NAME $LOOPDEV --hash sha1 --verify-passphrase 2>/dev/null || fail
 $CRYPTSETUP -q remove  $DEV_NAME || fail
@@ -535,12 +601,10 @@ echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT $LOOPDEV -d $KEY1 || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep -q "Key Slot 0: ENABLED" || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep -q $TEST_UUID || fail
 echo $PWDW | $CRYPTSETUP luksDump $LOOPDEV --dump-master-key 2>/dev/null && fail
-echo $PWD1 | $CRYPTSETUP luksDump $LOOPDEV --dump-master-key | grep -q "MK dump:" || can_fail_fips
-$CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key -d $KEY1 | grep -q "MK dump:" || can_fail_fips
-echo $PWD1 | $CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key --master-key-file $VK_FILE > /dev/null || can_fail_fips
-fips_mode || {
-	echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT --master-key-file $VK_FILE $LOOPDEV || fail
-}
+echo $PWD1 | $CRYPTSETUP luksDump $LOOPDEV --dump-master-key | grep -q "MK dump:" || fail
+$CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key -d $KEY1 | grep -q "MK dump:" || fail
+echo $PWD1 | $CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key --master-key-file $VK_FILE > /dev/null || fail
+echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT --master-key-file $VK_FILE $LOOPDEV || fail
 
 prepare "[22] remove disappeared device" wipe
 dmsetup create $DEV_NAME --table "0 5000 linear $LOOPDEV 2" || fail
@@ -550,7 +614,7 @@ echo $PWD1 | $CRYPTSETUP -q luksOpen /dev/mapper/$DEV_NAME $DEV_NAME2 || fail
 dmsetup load $DEV_NAME --table "0 5000 error" || fail
 dmsetup resume $DEV_NAME || fail
 $CRYPTSETUP -q luksClose $DEV_NAME2 || fail
-dmsetup remove $DEV_NAME || fail
+dmsetup remove --retry $DEV_NAME || fail
 
 prepare "[23] ChangeKey passphrase and keyfile" wipe
 # [0]$KEY1 [1]key0
@@ -622,7 +686,7 @@ $CRYPTSETUP --key-file=/dev/mapper/$DEV_NAME2 -l 13 --keyfile-offset 5120000000 
 $CRYPTSETUP luksClose $DEV_NAME || fail
 $CRYPTSETUP luksChangeKey $LOOPDEV $FAST_PBKDF_OPT -d /dev/mapper/$DEV_NAME2 \
   --keyfile-offset 5120000000 -l 13 /dev/mapper/$DEV_NAME2 --new-keyfile-offset 5120000001 --new-keyfile-size 15 || fail
-dmsetup remove $DEV_NAME2
+dmsetup remove --retry $DEV_NAME2
 
 prepare "[25] Create shared segments" wipe
 echo $PWD1 | $CRYPTSETUP create $DEV_NAME $LOOPDEV  --hash sha1 --offset   0 --size 256 || fail
@@ -642,17 +706,24 @@ $CRYPTSETUP luksSuspend $DEV_NAME 2>/dev/null && fail
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV || fail
 echo $PWD1 | $CRYPTSETUP -q luksOpen $LOOPDEV $DEV_NAME || fail
 $CRYPTSETUP luksSuspend $DEV_NAME || fail
+$CRYPTSETUP -q status  $DEV_NAME | grep -q "(suspended)" || fail
 $CRYPTSETUP -q resize  $DEV_NAME 2>/dev/null && fail
 echo $PWDW | $CRYPTSETUP luksResume $DEV_NAME 2>/dev/null && fail
 [ $? -ne 2 ] && fail "luksResume should return EPERM exit code"
 echo $PWD1 | $CRYPTSETUP luksResume $DEV_NAME  || fail
+$CRYPTSETUP -q luksClose $DEV_NAME || fail
+echo | $CRYPTSETUP -q luksFormat -c null $FAST_PBKDF_OPT --type luks1 $LOOPDEV || fail
+echo | $CRYPTSETUP -q luksOpen $LOOPDEV $DEV_NAME || fail
+$CRYPTSETUP luksSuspend $DEV_NAME || fail
+$CRYPTSETUP -q status  $DEV_NAME | grep -q "(suspended)" || fail
+echo | $CRYPTSETUP luksResume $DEV_NAME || fail
 $CRYPTSETUP -q luksClose $DEV_NAME || fail
 
 prepare "[27] luksOpen with specified key slot number" wipe
 # first, let's try passphrase option
 echo $PWD3 | $CRYPTSETUP luksFormat --type luks1 $FAST_PBKDF_OPT -S 5 $LOOPDEV || fail
 check $LUKS_HEADER $KEY_SLOT5 $KEY_MATERIAL5
-echo $PWD3 | $CRYPTSETUP luksOpen -S 4 $LOOPDEV $DEV_NAME && fail
+echo $PWD3 | $CRYPTSETUP luksOpen -S 4 $LOOPDEV $DEV_NAME 2>/dev/null && fail
 [ -b /dev/mapper/$DEV_NAME ] && fail
 echo $PWD3 | $CRYPTSETUP luksOpen -S 5 $LOOPDEV $DEV_NAME || fail
 check_exists
@@ -687,6 +758,7 @@ echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --h
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --offset 80000 >/dev/null 2>&1 || fail
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --offset 8192 || fail
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --offset 0 || fail
+echo $PWD1 | $CRYPTSETUP luksOpen $LOOPDEV-missing --header $HEADER_IMG $DEV_NAME 2>/dev/null && fail
 echo $PWD1 | $CRYPTSETUP luksOpen $LOOPDEV --header $HEADER_IMG $DEV_NAME || fail
 $CRYPTSETUP -q resize  $DEV_NAME --size 100 --header $HEADER_IMG || fail
 $CRYPTSETUP -q status  $DEV_NAME --header $HEADER_IMG | grep "size:" | grep -q "100 sectors" || fail
@@ -695,13 +767,14 @@ $CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "100 sectors" || fail
 $CRYPTSETUP luksSuspend $DEV_NAME --header $HEADER_IMG || fail
 echo $PWD1 | $CRYPTSETUP luksResume $DEV_NAME --header $HEADER_IMG || fail
 $CRYPTSETUP luksSuspend $DEV_NAME || fail
-echo $PWD1 | $CRYPTSETUP luksResume $DEV_NAME && fail
+echo $PWD1 | $CRYPTSETUP luksResume $DEV_NAME 2>/dev/null && fail
 echo $PWD1 | $CRYPTSETUP luksResume $DEV_NAME --header $HEADER_IMG || fail
 $CRYPTSETUP luksClose $DEV_NAME || fail
 echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT -S 5 _fakedev_ --header $HEADER_IMG $KEY5 || fail
 $CRYPTSETUP luksDump _fakedev_ --header $HEADER_IMG | grep -q "Key Slot 5: ENABLED" || fail
 $CRYPTSETUP luksKillSlot -q _fakedev_ --header $HEADER_IMG 5 || fail
 $CRYPTSETUP luksDump _fakedev_ --header $HEADER_IMG | grep -q "Key Slot 5: DISABLED" || fail
+echo $PWD1 | $CRYPTSETUP open --test-passphrase $HEADER_IMG || fail
 
 prepare "[29] Repair metadata" wipe
 $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV $KEY1 --key-slot 0 || fail
@@ -742,15 +815,19 @@ fi
 which expect >/dev/null 2>&1 || skip "WARNING: expect tool missing, interactive test will be skipped." 0
 
 prepare "[32] Interactive password retry from terminal." new
-expect - >/dev/null <<EOF
+EXPECT_DEV=$(losetup $LOOPDEV | sed -e "s/.*(\(.*\))/\1/")
+EXPECT_TIMEOUT=10
+[ -n "$VALG" ] && EXPECT_TIMEOUT=60
+
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP luksOpen -v -T 2 $LOOPDEV $DEV_NAME
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksOpen -v -T 2 $LOOPDEV $DEV_NAME
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0 x\n"
 expect timeout abort "No key available with this passphrase."
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0\n"
 expect timeout abort "Key slot 0 unlocked."
@@ -763,15 +840,15 @@ check_exists
 $CRYPTSETUP -q luksClose  $DEV_NAME || fail
 
 prepare "[33] Interactive unsuccessful password retry from terminal." new
-expect - >/dev/null <<EOF
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP luksOpen -v -T 2 $LOOPDEV $DEV_NAME
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksOpen -v -T 2 $LOOPDEV $DEV_NAME
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0 x\n"
 expect timeout abort "No key available with this passphrase."
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0 y\n"
 expect timeout abort "No key available with this passphrase."
@@ -781,18 +858,18 @@ EOF
 [ $? -eq 0 ] || fail "Expect script failed."
 
 prepare "[34] Interactive kill of last key slot." new
-expect - >/dev/null <<EOF
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP luksKillSlot -v $LOOPDEV 0
-expect timeout abort "Are you sure? (Type uppercase yes):"
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksKillSlot -v $LOOPDEV 0
+expect timeout abort "Are you sure? (Type 'yes' in capital letters):"
 send "YES\n"
 expect timeout abort "Enter any remaining passphrase:"
 sleep 0.1
 send "$PWD0\n"
 expect timeout abort "Command successful."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksKillSlot -v $LOOPDEV 0
+eval spawn $CRYPTSETUP_RAW luksKillSlot -v $LOOPDEV 0
 expect timeout abort "Keyslot 0 is not active."
 expect timeout abort eof
 exit
@@ -800,13 +877,13 @@ EOF
 [ $? -eq 0 ] || fail "Expect script failed."
 
 prepare "[35] Interactive format of device." wipe
-expect - >/dev/null <<EOF
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP luksFormat --type luks1 $FAST_PBKDF_OPT -v $LOOPDEV
-expect timeout abort "Are you sure? (Type uppercase yes):"
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksFormat --type luks1 $FAST_PBKDF_OPT -v $LOOPDEV
+expect timeout abort "Are you sure? (Type 'yes' in capital letters):"
 send "YES\n"
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0\n"
 expect timeout abort "Verify passphrase:"
@@ -814,8 +891,8 @@ sleep 0.1
 send "$PWD0\n"
 expect timeout abort "Command successful."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksOpen -v $LOOPDEV --test-passphrase
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+eval spawn $CRYPTSETUP_RAW luksOpen -v $LOOPDEV --test-passphrase
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0\n"
 expect timeout abort "Command successful."
@@ -825,18 +902,18 @@ EOF
 [ $? -eq 0 ] || fail "Expect script failed."
 
 prepare "[36] Interactive unsuccessful format of device." new
-expect - >/dev/null <<EOF
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP erase -v $LOOPDEV
-expect timeout abort "Are you sure? (Type uppercase yes):"
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW erase -v $LOOPDEV
+expect timeout abort "Are you sure? (Type 'yes' in capital letters):"
 send "YES\n"
 expect timeout abort "Command successful."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksFormat --type luks1 $FAST_PBKDF_OPT -v $LOOPDEV
-expect timeout abort "Are you sure? (Type uppercase yes):"
+eval spawn $CRYPTSETUP_RAW luksFormat --type luks1 $FAST_PBKDF_OPT -v $LOOPDEV
+expect timeout abort "Are you sure? (Type 'yes' in capital letters):"
 send "YES\n"
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0\n"
 expect timeout abort "Verify passphrase:"
@@ -844,21 +921,21 @@ sleep 0.1
 send "$PWD0 x\n"
 expect timeout abort "Passphrases do not match."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksOpen -v $LOOPDEV -T 1 --test-passphrase
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+eval spawn $CRYPTSETUP_RAW luksOpen -v $LOOPDEV -T 1 --test-passphrase
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0\n"
-expect timeout abort "No key available with this passphrase."
+expect timeout abort "No usable keyslot is available."
 expect timeout abort eof
 exit
 EOF
 [ $? -eq 0 ] || fail "Expect script failed."
 
 prepare "[37] Interactive add key." new
-expect - >/dev/null <<EOF
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP luksAddKey -S 2 $FAST_PBKDF_OPT -v $LOOPDEV
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksAddKey -S 2 $FAST_PBKDF_OPT -v $LOOPDEV
 expect timeout abort "Enter any existing passphrase:"
 sleep 0.1
 send "$PWD0\n"
@@ -870,16 +947,16 @@ sleep 0.1
 send "$PWD1\n"
 expect timeout abort "Command successful."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksOpen $FAST_PBKDF_OPT -v $LOOPDEV --test-passphrase
+eval spawn $CRYPTSETUP_RAW luksOpen $FAST_PBKDF_OPT -v $LOOPDEV --test-passphrase
 expect timeout abort "Enter passphrase"
 sleep 0.1
 send "$PWD1\n"
 expect timeout abort "Command successful."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksKillSlot -v $LOOPDEV 1
+eval spawn $CRYPTSETUP_RAW luksKillSlot -v $LOOPDEV 1
 expect timeout abort "Keyslot 1 is not active."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksKillSlot -v $LOOPDEV 2
+eval spawn $CRYPTSETUP_RAW luksKillSlot -v $LOOPDEV 2
 expect timeout abort "Enter any remaining passphrase:"
 sleep 0.1
 send "$PWD0\n"
@@ -890,10 +967,10 @@ EOF
 [ $? -eq 0 ] || fail "Expect script failed."
 
 prepare "[38] Interactive change key." new
-expect - >/dev/null <<EOF
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP luksChangeKey $FAST_PBKDF_OPT -v $LOOPDEV
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksChangeKey $FAST_PBKDF_OPT -v $LOOPDEV
 expect timeout abort "Enter passphrase to be changed:"
 sleep 0.1
 send "$PWD0\n"
@@ -905,8 +982,8 @@ sleep 0.1
 send "$PWD1\n"
 expect timeout abort "Command successful."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksOpen -v $LOOPDEV --test-passphrase
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+eval spawn $CRYPTSETUP_RAW luksOpen -v $LOOPDEV --test-passphrase
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD1\n"
 expect timeout abort "Command successful."
@@ -917,28 +994,28 @@ EOF
 
 prepare "[39] Interactive suspend and resume." new
 echo $PWD0 | $CRYPTSETUP luksOpen $LOOPDEV $DEV_NAME || fail
-expect - >/dev/null <<EOF
+expect_run - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
-set timeout 10
-eval spawn $CRYPTSETUP luksSuspend -v $DEV_NAME
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksSuspend -v $DEV_NAME
 expect timeout abort "Command successful."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksResume -v -T 3  $DEV_NAME
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+eval spawn $CRYPTSETUP_RAW luksResume -v -T 3  $DEV_NAME
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0 x\n"
 expect timeout abort "No key available with this passphrase."
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD1\n"
 expect timeout abort "No key available with this passphrase."
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0 y\n"
 expect timeout abort "No key available with this passphrase."
 expect timeout abort eof
-eval spawn $CRYPTSETUP luksResume -v $DEV_NAME
-expect timeout abort "Enter passphrase for $LOOPDEV:"
+eval spawn $CRYPTSETUP_RAW luksResume -v $DEV_NAME
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
 sleep 0.1
 send "$PWD0\n"
 expect timeout abort "Command successful."
@@ -947,6 +1024,42 @@ exit
 EOF
 [ $? -eq 0 ] || fail "Expect script failed."
 $CRYPTSETUP remove $DEV_NAME || fail
+
+prepare "[40] Long passphrase from TTY." wipe
+EXPECT_DEV=$(losetup $LOOPDEV | sed -e "s/.*(\(.*\))/\1/")
+
+# Password of maximal length 512 characters
+LONG_PWD=\
+"0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789ABCDEF"\
+"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do "\
+"eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut e"\
+"nim ad minim veniam, quis nostrud exercitation ullamco laboris n"\
+"isi ut aliquip ex ea commodo consequat. Duis aute irure dolor in"\
+" reprehenderit in voluptate velit esse cillum dolore eu fugiat n"\
+"ulla pariatur. Excepteur sint occaecat cupidatat non proident, s"\
+"unt in culpa qui officia deserunt mollit anim id est laborum.DEF"
+
+echo -n "$LONG_PWD" >$KEYE
+
+expect_run - >/dev/null <<EOF
+proc abort {} { send_error "Timeout. "; exit 2 }
+set timeout $EXPECT_TIMEOUT
+eval spawn $CRYPTSETUP_RAW luksFormat --type luks1 $FAST_PBKDF_OPT -v $LOOPDEV
+expect timeout abort "Are you sure? (Type 'yes' in capital letters):"
+send "YES\n"
+expect timeout abort "Enter passphrase for $EXPECT_DEV:"
+sleep 0.1
+send "$LONG_PWD\n"
+expect timeout abort "Verify passphrase:"
+sleep 0.1
+send "$LONG_PWD\n"
+expect timeout abort "Command successful."
+expect timeout abort eof
+eval spawn $CRYPTSETUP_RAW luksOpen -v $LOOPDEV --test-passphrase --key-file $KEYE
+expect timeout abort "Command successful."
+expect timeout abort eof
+EOF
+[ $? -eq 0 ] || fail "Expect script failed."
 
 remove_mapping
 exit 0
