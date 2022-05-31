@@ -1,6 +1,7 @@
 #!/bin/bash
 
-CRYPTSETUP=../cryptsetup
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
 
 # try to validate using loop-AES losetup/kernel if available
 LOSETUP_AES=/losetup-aes.old
@@ -15,7 +16,7 @@ LOOPDEV=$(losetup -f 2>/dev/null)
 
 function dmremove() { # device
 	udevadm settle >/dev/null 2>&1
-	dmsetup remove $1 >/dev/null 2>&1
+	dmsetup remove --retry $1 >/dev/null 2>&1
 }
 
 function remove_mapping()
@@ -28,7 +29,8 @@ function remove_mapping()
 
 function fail()
 {
-	echo "FAILED at line $(caller)"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
 	remove_mapping
 	exit 2
 }
@@ -89,10 +91,7 @@ function get_expsum() # $offset
 
 function check_sum() # $key $keysize $offset [stdin|keyfile]
 {
-	# Fill device with zeroes and reopen it
-	dd if=/dev/zero of=/dev/mapper/$DEV_NAME bs=1k $LOOP_DD_PARAM >/dev/null 2>&1
-	sync
-	dmremove $DEV_NAME
+	$CRYPTSETUP close $DEV_NAME || fail
 
 	EXPSUM=$(get_expsum $3)
 	if [ "$4" == "stdin" ] ; then
@@ -161,8 +160,9 @@ for key_size in $KEY_SIZES ; do
 			2>/dev/null
 		[ $? -ne 0 ] && echo "[SKIPPED]" && continue
 		check_exists
+		# Fill device with zeroes and reopen it
+		dd if=/dev/zero of=/dev/mapper/$DEV_NAME $LOOP_DD_PARAM >/dev/null 2>&1
 		check_sum $key $key_size $offset keyfile
-		$CRYPTSETUP loopaesClose $DEV_NAME || fail
 		check_sum $key $key_size $offset stdin
 		$CRYPTSETUP loopaesClose $DEV_NAME || fail
 		check_sum_losetup $key AES$key_size $offset
