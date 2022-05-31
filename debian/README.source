@@ -18,36 +18,22 @@ Importing a new upstream release
        as a remote in the Git repository where you're doing the packaging
        work and it's up to date:
 
-           git remote add --tags upstream git+ssh://gitlab.com/cryptsetup/cryptsetup.git
-           git config remote.upstream.fetch master:upstream-2.0.x
+           git remote add upstream https://gitlab.com/cryptsetup/cryptsetup.git
+           git config remote.upstream.fetch +refs/heads/master:refs/remotes/upstream/master
+           git branch -u refs/remotes/upstream/master upstream/latest
+           git config remote.upstream.tagOpt --tags
 
-       Please note we tack the upstream 'master' branch in our branch
-       'upstream-2.0.x' for historical reasons.
+    1. Merge the newest upstream release tag (pass --upstream-version=$VERSION
+       if you want a specific upstream version) into the 'debian/latest'
+       branch of your packaging repository:
 
-    1. Update 'upstream' remote
+           gbp import-orig --uscan
 
-           git fetch --tags upstream
-
-    2. Determine the release tag corresponding to the new release. At the time
-       of this writing, upstream uses tags in the form:
-
-           TAG="v$VERSION"
-
-       This convention may change, so double-check with 'git tag'.
-
-    3. Validate the gpg signature for this release tag:
-
-           git verify-tag "$TAG"
-
-       The signing key can be found in 'debian/upstream-signing-key.asc'.
-       Use `gpg -q debian/upstream-signing-key.asc` to show its
-       fingerprint.
-
-    4. Merge the upstream release tag <tag> into the master branch of your
-       packaging repository:
-
-           git checkout master
-           git merge -m "Updated version $VERSION from '$TAG'" "$TAG"
+       That commands does all the magic, namely
+       - updating the `upstream` remote,
+       - verifying the cryptographic signature on the upstream tag 'v$VERSION',
+       - creating a new tag 'upstream/$VERSION' with 'v$VERSION' as additional parent, and
+       - merging 'upstream/$VERSION' it into 'debian/latest'
 
     N. After development and testing, the final packages to be uploaded to
        Debian are built and tagged in the repository as follows:

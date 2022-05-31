@@ -1,7 +1,7 @@
 /*
  * dm-verity volume handling
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2021 Red Hat, Inc. All rights reserved.
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -46,6 +46,7 @@ int VERITY_activate(struct crypt_device *cd,
 		     const char *name,
 		     const char *root_hash,
 		     size_t root_hash_size,
+		     const char *signature_description,
 		     struct device *fec_device,
 		     struct crypt_params_verity *verity_hdr,
 		     uint32_t activation_flags);
@@ -57,7 +58,7 @@ int VERITY_verify(struct crypt_device *cd,
 
 int VERITY_create(struct crypt_device *cd,
 		  struct crypt_params_verity *verity_hdr,
-		  char *root_hash,
+		  const char *root_hash,
 		  size_t root_hash_size);
 
 int VERITY_FEC_process(struct crypt_device *cd,
@@ -69,6 +70,10 @@ int VERITY_FEC_process(struct crypt_device *cd,
 uint64_t VERITY_hash_offset_block(struct crypt_params_verity *params);
 
 uint64_t VERITY_hash_blocks(struct crypt_device *cd, struct crypt_params_verity *params);
+
+uint64_t VERITY_FEC_blocks(struct crypt_device *cd,
+			   struct device *fec_device,
+			   struct crypt_params_verity *params);
 
 int VERITY_UUID_generate(struct crypt_device *cd, char **uuid_string);
 
