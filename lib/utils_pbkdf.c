@@ -1,8 +1,8 @@
 /*
  * utils_pbkdf - PBKDF settings for libcryptsetup
  *
- * Copyright (C) 2009-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2021 Milan Broz
+ * Copyright (C) 2009-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2022 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -92,7 +92,7 @@ int verify_pbkdf_params(struct crypt_device *cd,
 	if (r < 0)
 		return r;
 
-	if (!pbkdf->type ||
+	if (!pbkdf || !pbkdf->type ||
 	    (!pbkdf->hash && !strcmp(pbkdf->type, "pbkdf2")))
 		return -EINVAL;
 

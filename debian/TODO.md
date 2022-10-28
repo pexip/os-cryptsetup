@@ -1,25 +1,5 @@
 # TODO list
 
-* luksSuspend integration
-  * https://www.freedesktop.org/wiki/Software/systemd/inhibit/ might give a cleaner interface
-  * https://lwn.net/Articles/582648/ (flag is now `SUSPEND_SKIP_SYNC`)
-  * https://guilhem.org/tmp/suspend
-  * implementations for other distros:
-    * https://github.com/jonasmalacofilho/ubuntu-luks-suspend
-    * https://github.com/vianney/arch-luks-suspend
-    * https://github.com/zhongfu/ubuntu-luks-suspend
-    * https://github.com/Microcentillion/ubuntu-lukssuspend/
-    * https://askubuntu.com/questions/348196/how-do-i-enable-ubuntu-using-full-disk-encryption-to-call-lukssupend-before-sl#675540
-    * https://superuser.com/questions/648333/how-to-make-suspend-to-ram-secure-on-ubuntu-with-full-disk-encryption-lvm-on-to#676531
-  * clearly document the limits: data in memory is never protected
-  * suspend/resume
-    * root@debian:~# systemctl suspend
-    * root@debian:~# (qemu) info status
-      * VM status: paused (suspended)
-      * (qemu) sendkey x
-      * (qemu) info status
-      * VM status: running
-
 * luks nuke feature
   * https://www.kali.org/tutorials/nuke-kali-linux-luks/
   * https://pkg.kali.org/pkg/cryptsetup
@@ -45,10 +25,6 @@
 * cryptroot hook script:
   - We should add parent device detection for ZFS (#820888) so users
     don't have to manually add the 'initramfs' option to the crypttab.
-* cryptroot local-top script:
-  - Find a solution to run 'lvm vgchange' only after all lvm parent devices
-    are unlocked. At the moment, ugly errors and warnings are shown in case
-    of several encrypted parent devices.
 
 
 ## Old list

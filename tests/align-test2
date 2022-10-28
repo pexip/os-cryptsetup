@@ -5,6 +5,7 @@ CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
 DEV=""
 DEV_STACKED="luks0xbabe"
 DEV_NAME="dummyalign"
+HDR="test_luks2_hdr"
 MNT_DIR="./mnt_luks"
 PWD1="93R4P4pIqAH8"
 PWD2="mymJeD8ivEhE"
@@ -13,15 +14,16 @@ FAST_PBKDF="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
 cleanup() {
 	udevadm settle >/dev/null 2>&1
 	if [ -d "$MNT_DIR" ] ; then
-	    umount -f $MNT_DIR 2>/dev/null
-	    rmdir $MNT_DIR 2>/dev/null
+		umount -f $MNT_DIR 2>/dev/null
+		rmdir $MNT_DIR 2>/dev/null
 	fi
 	[ -b /dev/mapper/$DEV_STACKED ] && dmsetup remove --retry $DEV_STACKED >/dev/null 2>&1
 	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove --retry $DEV_NAME >/dev/null 2>&1
 	# FIXME scsi_debug sometimes in-use here
 	sleep 1
-	rmmod scsi_debug 2>/dev/null
+	rmmod scsi_debug >/dev/null 2>&1
 	sleep 1
+	rm -f $HDR 2>/dev/null
 }
 
 fail()
@@ -37,7 +39,7 @@ skip()
 {
 	echo "TEST SKIPPED: $1"
 	cleanup
-	exit 0
+	exit 77
 }
 
 function dm_crypt_features()
@@ -58,13 +60,13 @@ function dm_crypt_features()
 
 	[ $VER_MIN -lt 14 ] && return
 	DM_PERF_CPU=1
-	if [ $VER_MIN -ge 17 -o \( $VER_MIN -eq 14 -a $VER_PTC -ge 5 \) ]; then
+	if [ $VER_MIN -ge 17 ]; then
 		DM_SECTOR_SIZE=1
 	fi
 }
 
 add_device() {
-	modprobe scsi_debug $@ delay=0
+	modprobe scsi_debug $@ delay=0 >/dev/null 2>&1
 	if [ $? -ne 0 ] ; then
 		echo "This kernel seems to not support proper scsi_debug module, test skipped."
 		exit 77
@@ -112,7 +114,7 @@ format() # expected [forced] [encryption_sector_size]
 		$CRYPTSETUP close $DEV_NAME || fail
 	fi
 
-	ALIGN=$($CRYPTSETUP luksDump $DEV | tee  /tmp/last_dump | grep -A1 "0: crypt" | grep "offset:" | cut -d ' ' -f2)
+	ALIGN=$($CRYPTSETUP luksDump $DEV | grep -A1 "0: crypt" | grep "offset:" | cut -d ' ' -f2)
 	# echo "ALIGN = $ALIGN"
 
 	[ -z "$ALIGN" ] && fail
@@ -155,14 +157,54 @@ format_fail() # expected [forced] [encryption_sector_size]
 	echo "PASSED"
 }
 
+auto_sector() # expected device header
+{
+	local _exp=$1
+	local _dev=$2
+	local _hdr=$2
+	local _hdrstr=""
+	local _hdrmsg=""
+
+	if [ -n "$3" ]; then
+		_hdrstr="--header $3"
+		_hdr=$3
+		_hdrmsg=" detached header"
+	fi
+
+	echo -n "Formatting$_hdrmsg using optimal encryption sector size (expecting $_exp)..."
+
+	if [ -z "$DM_SECTOR_SIZE" -a $_exp -ne 512 ]; then
+		echo "SKIPPED"
+		return
+	fi
+
+	echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF --type luks2 $_hdrstr $_dev -q >/dev/null 2>&1 || fail
+
+	# check the device can be activated
+	echo $PWD1 | $CRYPTSETUP luksOpen $_hdrstr $_dev $DEV_NAME || fail
+	$CRYPTSETUP close $DEV_NAME || fail
+
+	SECTOR=$($CRYPTSETUP luksDump $_hdr | grep -A4 "0: crypt" | grep "sector:" | cut -d ' ' -f2)
+
+	[ -z "$SECTOR" ] && fail
+	[ $SECTOR -ne $_exp ] && fail "Expected sector size differs: expected $_exp != detected $SECTOR"
+
+	echo "PASSED"
+}
+
+[ ! -x "$CRYPTSETUP" ] && skip "Cannot find $CRYPTSETUP, test skipped."
 if [ $(id -u) != 0 ]; then
 	echo "WARNING: You must be root to run this test, test skipped."
 	exit 77
 fi
 
 dm_crypt_features
-modprobe --dry-run scsi_debug || exit 77
+modprobe --dry-run scsi_debug >/dev/null 2>&1 || skip "This kernel seems to not support proper scsi_debug module, test skipped."
 cleanup
+if [ -d /sys/module/scsi_debug ] ; then
+	echo "Cannot use scsi_debug module (in use or compiled-in), test skipped."
+	exit 77
+fi
 
 add_device dev_size_mb=32
 echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF --type luks2 $DEV -q  >/dev/null || fail
@@ -356,12 +398,36 @@ echo "# Create enterprise-class 4K drive with fs and LUKS images."
 # cryptsetup should properly use 4k block on direct-io
 add_device dev_size_mb=32 sector_size=4096 physblk_exp=0 num_tgts=1 opt_blks=64
 for file in $(ls img_fs_*.img.xz) ; do
-    echo "Format using fs image $file."
-    xz -d -c $file | dd of=$DEV bs=1M 2>/dev/null || fail "bad image"
-    [ ! -d $MNT_DIR ] && mkdir $MNT_DIR
-    mount $DEV $MNT_DIR || skip "Mounting image is not available."
-    echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF --type luks2 $MNT_DIR/luks.img --offset 8192 || fail
-    echo $PWD2 | $CRYPTSETUP luksFormat $FAST_PBKDF --type luks2 $MNT_DIR/luks.img --header $MNT_DIR/luks_header.img || fail
-    umount $MNT_DIR
+	echo "Format using fs image $file."
+	xz -d -c $file | dd of=$DEV bs=1M 2>/dev/null || fail "bad image"
+	[ ! -d $MNT_DIR ] && mkdir $MNT_DIR
+	mount $DEV $MNT_DIR || skip "Mounting image is not available."
+	echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF --type luks2 $MNT_DIR/luks.img --offset 8192 || fail
+	echo $PWD2 | $CRYPTSETUP luksFormat $FAST_PBKDF --type luks2 $MNT_DIR/luks.img --header $MNT_DIR/luks_header.img || fail
+	umount $MNT_DIR
 done
+cleanup
+
+echo "# Create classic 512B drive"
+echo "# (logical_block_size=512, physical_block_size=512, alignment_offset=0)"
+add_device dev_size_mb=32 sector_size=512 num_tgts=1
+auto_sector 512 $DEV
+auto_sector 512 $DEV $HDR
+cleanup
+echo "# Create desktop-class 4K drive"
+echo "# (logical_block_size=512, physical_block_size=4096, alignment_offset=0)"
+add_device dev_size_mb=32 sector_size=512 physblk_exp=3 num_tgts=1
+auto_sector 4096 $DEV
+auto_sector 4096 $DEV $HDR
+DEV2=$DEV
+DEV=/dev/mapper/$DEV_STACKED
+dmsetup create $DEV_STACKED --table "0 $((`blockdev --getsz $DEV2`-1)) linear $DEV2 0"
+auto_sector 512 $DEV
+auto_sector 512 $DEV $HDR
+cleanup
+echo "# Create enterprise-class 4K drive"
+echo "# (logical_block_size=4096, physical_block_size=4096, alignment_offset=0)"
+add_device dev_size_mb=32 sector_size=4096 num_tgts=1 opt_blks=64
+auto_sector 4096 $DEV
+auto_sector 4096 $DEV $HDR
 cleanup

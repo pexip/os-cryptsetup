@@ -5,13 +5,14 @@ Maintainer: Debian Cryptsetup Team <pkg-cryptsetup-devel@alioth-lists.debian.net
 Uploaders: Jonas Meurer <jonas@freesources.org>,
            Guilhem Moulin <guilhem@debian.org>
 Rules-Requires-Root: no
-Build-Depends: autoconf,
+Build-Depends: asciidoctor <!nodoc>,
+               autoconf,
                automake (>= 1:1.12),
                autopoint,
                debhelper-compat (= 13),
                dh-strip-nondeterminism,
-               docbook-xml,
-               docbook-xsl,
+               docbook-xml <!nodoc>,
+               docbook-xsl <!nodoc>,
                gettext,
                jq <!nocheck>,
                libargon2-dev,
@@ -20,16 +21,17 @@ Build-Depends: autoconf,
                libjson-c-dev,
                libpopt-dev,
                libselinux1-dev,
-               libsepol1-dev,
+               libsepol-dev,
+               libssh-dev,
                libssl-dev,
                libtool,
                pkg-config,
                po-debconf,
                procps <!nocheck>,
                uuid-dev,
-               xsltproc,
+               xsltproc <!nodoc>,
                xxd <!nocheck>
-Standards-Version: 4.5.1
+Standards-Version: 4.6.1
 Homepage: https://gitlab.com/cryptsetup/cryptsetup
 Vcs-Browser: https://salsa.debian.org/cryptsetup-team/cryptsetup
 Vcs-Git: https://salsa.debian.org/cryptsetup-team/cryptsetup.git -b debian/latest
@@ -41,9 +43,8 @@ Depends: cryptsetup-bin (>= 2:1.6.0),
          dmsetup,
          ${misc:Depends},
          ${shlibs:Depends}
-Suggests: dosfstools, keyutils, liblocale-gettext-perl
+Suggests: cryptsetup-initramfs, dosfstools, keyutils, liblocale-gettext-perl
 Replaces: cryptsetup-run (<< 2:2.1.0-6)
-Recommends: cryptsetup-initramfs, cryptsetup-run
 Breaks: cryptsetup-run (<< 2:2.1.0-6)
 Description: disk encryption support - startup scripts
  Cryptsetup provides an interface for configuring encryption on block
@@ -57,7 +58,7 @@ Description: disk encryption support - startup scripts
  file /etc/crypttab. Additional features are cryptoroot support through
  initramfs-tools and several supported ways to read a passphrase or key.
  .
- This package provides the cryptdisk_start and stop wrappers and
+ This package provides the cryptdisks_start and _stop wrappers, as well as
  luksformat.
 
 Package: cryptsetup-bin
@@ -70,8 +71,26 @@ Description: disk encryption support - command line tools
  device mapper target dm-crypt. It features integrated Linux Unified Key
  Setup (LUKS) support.
  .
- This package provides cryptsetup, cryptsetup-reencrypt, integritysetup
- and veritysetup.
+ This package provides the cryptsetup, integritysetup and veritysetup
+ utilities.
+
+Package: cryptsetup-ssh
+Architecture: linux-any
+Multi-Arch: foreign
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Recommends: cryptsetup-bin (>= ${source:Version})
+Breaks: cryptsetup (<< 2:2.5.0~rc1-3), cryptsetup-bin (<< 2:2.5.0~rc1-3)
+Replaces: cryptsetup (<< 2:2.5.0~rc1-3), cryptsetup-bin (<< 2:2.5.0~rc1-3)
+Description: disk encryption support - experimental SSH token handler
+ Cryptsetup provides an interface for configuring encryption on block
+ devices (such as /home or swap partitions), using the Linux kernel
+ device mapper target dm-crypt. It features integrated Linux Unified Key
+ Setup (LUKS) support.
+ .
+ This package provides the cryptsetup-ssh(8) utility and an SSH token plugin
+ which can be used to unlock LUKS2 devices using a remote keyfile hosted on a
+ system accessible through SSH.  This is currently an *experimental* feature
+ and mostly serves as a demonstration of the plugin interface API.
 
 Package: cryptsetup-initramfs
 Architecture: all
@@ -82,6 +101,7 @@ Depends: busybox | busybox-static,
 Recommends: console-setup, kbd
 Breaks: cryptsetup (<< 2:2.0.3-1)
 Replaces: cryptsetup (<< 2:2.0.3-1)
+Conflicts: lvm2 (<< 2.03.15-1)
 Description: disk encryption support - initramfs integration
  Cryptsetup provides an interface for configuring encryption on block
  devices (such as /home or swap partitions), using the Linux kernel
@@ -89,6 +109,28 @@ Description: disk encryption support - initramfs integration
  Setup (LUKS) support.
  .
  This package provides initramfs integration for cryptsetup.
+
+Package: cryptsetup-suspend
+Architecture: linux-any
+Multi-Arch: foreign
+Depends: cryptsetup-initramfs (>= ${source:Version}),
+         initramfs-tools-core,
+         kbd,
+         systemd,
+         ${misc:Depends},
+         ${shlibs:Depends}
+Description: disk encryption support - suspend mode integration
+ Cryptsetup provides an interface for configuring encryption on block
+ devices (such as /home or swap partitions), using the Linux kernel
+ device mapper target dm-crypt. It features integrated Linux Unified Key
+ Setup (LUKS) support.
+ .
+ This package provides suspend mode integration for cryptsetup. It takes
+ care of removing LUKS master key from memory before system suspend.
+ .
+ Please note that the suspend mode integration is limited to LUKS devices
+ and requires systemd.  Moreover, this is an early implementation and may not
+ be as mature as the other cryptsetup-* packages yet.
 
 Package: cryptsetup-run
 Section: oldlibs
@@ -129,6 +171,7 @@ Description: disk encryption support - development files
 Package: cryptsetup-udeb
 Section: debian-installer
 Package-Type: udeb
+Build-Profiles: <!noudeb>
 Architecture: linux-any
 Depends: dmsetup-udeb, ${misc:Depends}, ${shlibs:Depends}
 Description: disk encryption support - commandline tools (udeb)
@@ -142,6 +185,7 @@ Description: disk encryption support - commandline tools (udeb)
 Package: libcryptsetup12-udeb
 Section: debian-installer
 Package-Type: udeb
+Build-Profiles: <!noudeb>
 Architecture: linux-any
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: disk encryption support - shared library (udeb)

@@ -17,6 +17,7 @@ KEYFILE=keyfile1
 function remove_mapping()
 {
 	[ -b /dev/mapper/$MAP ] && dmsetup remove --retry $MAP
+	rm -rf $TST_DIR
 }
 
 function fail()
@@ -32,18 +33,18 @@ function fail()
 function skip()
 {
 	[ -n "$1" ] && echo "$1"
-	echo "Test skipped."
+	remove_mapping
 	exit 77
 }
 
 function test_one()
 {
-	$CRYPTSETUP benchmark -c "$1" -s "$2" | grep -v "#" || skip
+	$CRYPTSETUP benchmark -c "$1" -s "$2" | grep -v "#" || skip "Cannot use $1/$2, test skipped."
 }
 
 function test_required()
 {
-	which lsblk >/dev/null 2>&1 || skip "WARNING: lsblk tool required."
+	command -v lsblk >/dev/null || skip "lsblk tool required, test skipped."
 
 	echo "REQUIRED KDF TEST"
 	$CRYPTSETUP benchmark -h whirlpool | grep "N/A" && skip
@@ -59,7 +60,7 @@ function test_required()
 }
 
 export LANG=C
-
+[ ! -x "$CRYPTSETUP" ] && skip "Cannot find $CRYPTSETUP, test skipped."
 test_required
 [ ! -d $TST_DIR ] && tar xJf $srcdir/luks1-images.tar.xz --no-same-owner
 
@@ -80,6 +81,7 @@ done
 
 if [ $(id -u) != 0 ]; then
 	echo "WARNING: You must be root to run activation part of test, test skipped."
+	remove_mapping
 	exit 0
 fi
 
@@ -102,3 +104,6 @@ for file in $(ls $TST_DIR/luks1_*) ; do
 	[ "$UUID" != "DEAD-BABE" ] && fail "UUID check failed."
 	echo " [OK]"
 done
+
+remove_mapping
+exit 0

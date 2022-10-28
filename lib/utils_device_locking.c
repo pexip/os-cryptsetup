@@ -1,8 +1,8 @@
 /*
  * Metadata on-disk locking for processes serialization
  *
- * Copyright (C) 2016-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2016-2021 Ondrej Kozina
+ * Copyright (C) 2016-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Ondrej Kozina
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -173,7 +173,7 @@ static int acquire_lock_handle(struct crypt_device *cd, struct device *device, s
 		h->u.bdev.devno = st.st_rdev;
 		h->mode = DEV_LOCK_BDEV;
 	} else if (S_ISREG(st.st_mode)) {
-		// FIXME: workaround for nfsv4
+		/* workaround for nfsv4 */
 		fd = open(device_path(device), O_RDWR | O_NONBLOCK | O_CLOEXEC);
 		if (fd < 0)
 			h->flock_fd = dev_fd;
@@ -229,7 +229,7 @@ static void release_lock_handle(struct crypt_device *cd, struct crypt_lock_handl
 	    !stat(res, &buf_b) && /* does path file still exist? */
 	    same_inode(buf_a, buf_b)) { /* is it same id as the one referenced by fd? */
 		/* coverity[toctou] */
-		if (unlink(res)) /* yes? unlink the file */
+		if (unlink(res)) /* yes? unlink the file. lgtm[cpp/toctou-race-condition] */
 			log_dbg(cd, "Failed to unlink resource file: %s", res);
 	}
 
@@ -240,7 +240,7 @@ static void release_lock_handle(struct crypt_device *cd, struct crypt_lock_handl
 	    !stat(res, &buf_b) && /* does path file still exist? */
 	    same_inode(buf_a, buf_b)) { /* is it same id as the one referenced by fd? */
 		/* coverity[toctou] */
-		if (unlink(res)) /* yes? unlink the file */
+		if (unlink(res)) /* yes? unlink the file. lgtm[cpp/toctou-race-condition] */
 			log_dbg(cd, "Failed to unlink resource file: %s", res);
 	}
 
@@ -261,7 +261,7 @@ int device_locked_readonly(struct crypt_lock_handle *h)
 	return (h && h->type == DEV_LOCK_READ);
 }
 
-static int verify_lock_handle(const char *device_path, struct crypt_lock_handle *h)
+static int verify_lock_handle(struct crypt_lock_handle *h)
 {
 	char res[PATH_MAX];
 	struct stat lck_st, res_st;
@@ -326,7 +326,7 @@ static int acquire_and_verify(struct crypt_device *cd, struct device *device, co
 		 * check whether another libcryptsetup process removed resource file before this
 		 * one managed to flock() it. See release_lock_handle() for details
 		 */
-		r = verify_lock_handle(device_path(device), h);
+		r = verify_lock_handle(h);
 		if (r < 0) {
 			if (flock(h->flock_fd, LOCK_UN))
 				log_dbg(cd, "flock on fd %d failed.", h->flock_fd);
@@ -505,11 +505,11 @@ int device_locked_verify(struct crypt_device *cd, int dev_fd, struct crypt_lock_
 
 	/* if device handle is regular file the handle must match the lock handle */
 	if (S_ISREG(dev_st.st_mode)) {
-		log_dbg(cd, "Veryfing locked device handle (regular file)");
+		log_dbg(cd, "Verifying locked device handle (regular file)");
 		if (!same_inode(dev_st, lck_st))
 			return 1;
 	} else if (S_ISBLK(dev_st.st_mode)) {
-		log_dbg(cd, "Veryfing locked device handle (bdev)");
+		log_dbg(cd, "Verifying locked device handle (bdev)");
 		if (resource_by_devno(res, sizeof(res), dev_st.st_rdev, 1) ||
 		    stat(res, &st) ||
 		    !same_inode(lck_st, st))

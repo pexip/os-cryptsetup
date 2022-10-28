@@ -1,8 +1,8 @@
 /*
  * GCRYPT crypto backend implementation
  *
- * Copyright (C) 2010-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2021 Milan Broz
+ * Copyright (C) 2010-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -94,7 +94,7 @@ static void crypt_hash_test_whirlpool_bug(void)
 		crypto_backend_whirlpool_bug = 1;
 }
 
-int crypt_backend_init(void)
+int crypt_backend_init(bool fips __attribute__((unused)))
 {
 	int r;
 
@@ -106,7 +106,7 @@ int crypt_backend_init(void)
 			return -ENOSYS;
 		}
 
-/* FIXME: If gcrypt compiled to support POSIX 1003.1e capabilities,
+/* If gcrypt compiled to support POSIX 1003.1e capabilities,
  * it drops all privileges during secure memory initialisation.
  * For now, the only workaround is to disable secure memory in gcrypt.
  * cryptsetup always need at least cap_sys_admin privilege for dm-ioctl
@@ -347,7 +347,7 @@ void crypt_hmac_destroy(struct crypt_hmac *ctx)
 }
 
 /* RNG */
-int crypt_backend_rng(char *buffer, size_t length, int quality, int fips)
+int crypt_backend_rng(char *buffer, size_t length, int quality, int fips __attribute__((unused)))
 {
 	switch(quality) {
 	case CRYPT_RND_NORMAL:
@@ -549,4 +549,9 @@ out:
 #else
 	return -ENOTSUP;
 #endif
+}
+
+int crypt_backend_memeq(const void *m1, const void *m2, size_t n)
+{
+	return crypt_internal_memeq(m1, m2, n);
 }

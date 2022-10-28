@@ -1,0 +1,20 @@
+stages:
+  - test
+
+.dump_kernel_log:
+  after_script:
+    - sudo dmesg > /mnt/artifacts/dmesg.log
+    - sudo journalctl > /mnt/artifacts/journalctl.log
+    - '[ "$(ls -A /var/coredumps)" ] && exit 1 || true'
+
+include:
+  - local: .gitlab/ci/debian.yml
+  - local: .gitlab/ci/fedora.yml
+  - local: .gitlab/ci/rhel.yml
+  - local: .gitlab/ci/centos.yml
+  - local: .gitlab/ci/annocheck.yml
+  - local: .gitlab/ci/csmock.yml
+  - local: .gitlab/ci/gitlab-shared-docker.yml
+  - local: .gitlab/ci/compilation-gcc.gitlab-ci.yml
+  - local: .gitlab/ci/compilation-clang.gitlab-ci.yml
+  - local: .gitlab/ci/alpinelinux.yml

@@ -1,8 +1,8 @@
 /*
  * NSS crypto backend implementation
  *
- * Copyright (C) 2010-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2021 Milan Broz
+ * Copyright (C) 2010-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -75,7 +75,7 @@ static struct hash_alg *_get_alg(const char *name)
 	return NULL;
 }
 
-int crypt_backend_init(void)
+int crypt_backend_init(bool fips __attribute__((unused)))
 {
 	int r;
 
@@ -225,28 +225,28 @@ int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
 
 	h->hash = _get_alg(name);
 	if (!h->hash)
-		goto bad;
+		goto err;
 
 	h->slot = PK11_GetInternalKeySlot();
 	if (!h->slot)
-		goto bad;
+		goto err;
 
 	h->key = PK11_ImportSymKey(h->slot, h->hash->ck_type, PK11_OriginUnwrap,
 				   CKA_SIGN,  &keyItem, NULL);
 	if (!h->key)
-		goto bad;
+		goto err;
 
 	h->md = PK11_CreateContextBySymKey(h->hash->ck_type, CKA_SIGN, h->key,
 					   &noParams);
 	if (!h->md)
-		goto bad;
+		goto err;
 
 	if (PK11_DigestBegin(h->md) != SECSuccess)
-		goto bad;
+		goto err;
 
 	*ctx = h;
 	return 0;
-bad:
+err:
 	crypt_hmac_destroy(h);
 	return -EINVAL;
 }
@@ -303,7 +303,7 @@ void crypt_hmac_destroy(struct crypt_hmac *ctx)
 }
 
 /* RNG */
-int crypt_backend_rng(char *buffer, size_t length, int quality, int fips)
+int crypt_backend_rng(char *buffer, size_t length, int quality __attribute__((unused)), int fips)
 {
 	if (fips)
 		return -EINVAL;
@@ -382,7 +382,7 @@ int crypt_cipher_decrypt(struct crypt_cipher *ctx,
 	return crypt_cipher_decrypt_kernel(&ctx->ck, in, out, length, iv, iv_length);
 }
 
-bool crypt_cipher_kernel_only(struct crypt_cipher *ctx)
+bool crypt_cipher_kernel_only(struct crypt_cipher *ctx __attribute__((unused)))
 {
 	return true;
 }
@@ -394,4 +394,9 @@ int crypt_bitlk_decrypt_key(const void *key, size_t key_length,
 {
 	return crypt_bitlk_decrypt_key_kernel(key, key_length, in, out, length,
 					      iv, iv_length, tag, tag_length);
+}
+
+int crypt_backend_memeq(const void *m1, const void *m2, size_t n)
+{
+	return NSS_SecureMemcmp(m1, m2, n);
 }

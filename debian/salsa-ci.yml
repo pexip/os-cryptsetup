@@ -1,11 +1,26 @@
 ---
 include:
-  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
-  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/pipeline-jobs.yml
+  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/recipes/debian.yml
 
 variables:
-  RELEASE: 'bullseye'
-  SALSA_CI_DISABLE_REPROTEST: 1
+  # Skip all DEP-8 tests except 'cryptroot-lvm': each 'cryptroot-*' test
+  # takes 20-30min on Salsa CI runners as they don't support KVM acceleration
+  # cf. https://salsa.debian.org/salsa-ci-team/pipeline/-/issues/266 ,
+  # and other tests are skipped anyway since they require machine-level
+  # isolation which the runners currently don't provide.
+  # Running 'cryptroot-lvm' and 'cryptroot-legacy' only is significantly
+  # better than disabling the autopkgtest job altogether.
+  SALSA_CI_AUTOPKGTEST_ARGS: '--test-name=cryptroot-lvm --test-name=cryptroot-legacy'
+
+# Run reprotest job under 'nocheck' build profile.  The job runs with
+# root privileges, which trigger extra tests within the upstream test
+# suite.  Some of these extra tests want to interact with the kernel,
+# load modules, and create/remove loop devices, which is beyond the
+# scope of the reprotest job.
+reprotest:
+  extends: .test-reprotest
+  variables:
+    DEB_BUILD_OPTIONS: nocheck
 
 # Add a deploy stage for pages
 stages:
@@ -17,13 +32,13 @@ stages:
   - deploy
 
 pages:
-  image: debian:10
+  image: debian:11
   script:
-    - apt update
-    - apt -y install pandoc
+    - apt-get update
+    - apt-get -y install pandoc
     - mkdir public
     # install CSS file
-    - cp debian/doc/pandoc/pandoc.css public/
+    - install -m0644 debian/doc/pandoc/pandoc.css public/pandoc.css
     # install index.html
     - ${PANDOC} -T "Debian Cryptsetup docs" -o public/index.html
           debian/doc/pandoc/index.md
