@@ -1,8 +1,8 @@
 /*
  * TCRYPT (TrueCrypt-compatible) and VeraCrypt volume handling
  *
- * Copyright (C) 2012-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2021 Milan Broz
+ * Copyright (C) 2012-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -264,8 +264,8 @@ static int TCRYPT_hdr_from_disk(struct crypt_device *cd,
  */
 static void TCRYPT_swab_le(char *buf)
 {
-	uint32_t *l = (uint32_t*)&buf[0];
-	uint32_t *r = (uint32_t*)&buf[4];
+	uint32_t *l = VOIDP_CAST(uint32_t*)&buf[0];
+	uint32_t *r = VOIDP_CAST(uint32_t*)&buf[4];
 	*l = swab32(*l);
 	*r = swab32(*r);
 }
@@ -274,11 +274,11 @@ static int decrypt_blowfish_le_cbc(struct tcrypt_alg *alg,
 				   const char *key, char *buf)
 {
 	int bs = alg->iv_size;
-	char iv[bs], iv_old[bs];
+	char iv[8], iv_old[8];
 	struct crypt_cipher *cipher = NULL;
 	int i, j, r;
 
-	assert(bs == 2*sizeof(uint32_t));
+	assert(bs == 8);
 
 	r = crypt_cipher_init(&cipher, "blowfish", "ecb",
 			      &key[alg->key_offset], alg->key_size);
@@ -380,11 +380,14 @@ static int TCRYPT_decrypt_hdr_one(struct tcrypt_alg *alg, const char *mode,
 static int TCRYPT_decrypt_cbci(struct tcrypt_algs *ciphers,
 				const char *key, struct tcrypt_phdr *hdr)
 {
-	struct crypt_cipher *cipher[ciphers->chain_count];
+	struct crypt_cipher *cipher[3];
 	unsigned int bs = ciphers->cipher[0].iv_size;
-	char *buf = (char*)&hdr->e, iv[bs], iv_old[bs];
+	char *buf = (char*)&hdr->e, iv[16], iv_old[16];
 	unsigned int i, j;
 	int r = -EINVAL;
+
+	assert(ciphers->chain_count <= 3);
+	assert(bs <= 16);
 
 	TCRYPT_remove_whitening(buf, &key[8]);
 
@@ -425,13 +428,15 @@ out:
 }
 
 static int TCRYPT_decrypt_hdr(struct crypt_device *cd, struct tcrypt_phdr *hdr,
-			       const char *key, uint32_t flags)
+			       const char *key, struct crypt_params_tcrypt *params)
 {
 	struct tcrypt_phdr hdr2;
 	int i, j, r = -EINVAL;
 
 	for (i = 0; tcrypt_cipher[i].chain_count; i++) {
-		if (!(flags & CRYPT_TCRYPT_LEGACY_MODES) && tcrypt_cipher[i].legacy)
+		if (params->cipher && !strstr(tcrypt_cipher[i].long_name, params->cipher))
+			continue;
+		if (!(params->flags & CRYPT_TCRYPT_LEGACY_MODES) && tcrypt_cipher[i].legacy)
 			continue;
 		log_dbg(cd, "TCRYPT:  trying cipher %s-%s",
 			tcrypt_cipher[i].long_name, tcrypt_cipher[i].mode);
@@ -463,7 +468,7 @@ static int TCRYPT_decrypt_hdr(struct crypt_device *cd, struct tcrypt_phdr *hdr,
 			r = i;
 			break;
 		}
-		if ((flags & CRYPT_TCRYPT_VERA_MODES) &&
+		if ((params->flags & CRYPT_TCRYPT_VERA_MODES) &&
 		     !strncmp(hdr2.d.magic, VCRYPT_HDR_MAGIC, TCRYPT_HDR_MAGIC_LEN)) {
 			log_dbg(cd, "TCRYPT: Signature magic detected (Veracrypt).");
 			memcpy(&hdr->e, &hdr2.e, TCRYPT_HDR_LEN);
@@ -568,6 +573,8 @@ static int TCRYPT_init_hdr(struct crypt_device *cd,
 		pwd[i] += params->passphrase[i];
 
 	for (i = 0; tcrypt_kdf[i].name; i++) {
+		if (params->hash_name && strcmp(params->hash_name, tcrypt_kdf[i].hash))
+			continue;
 		if (!(params->flags & CRYPT_TCRYPT_LEGACY_MODES) && tcrypt_kdf[i].legacy)
 			continue;
 		if (!(params->flags & CRYPT_TCRYPT_VERA_MODES) && tcrypt_kdf[i].veracrypt)
@@ -581,7 +588,6 @@ static int TCRYPT_init_hdr(struct crypt_device *cd,
 				    (tcrypt_kdf[i].veracrypt_pim_mult * params->veracrypt_pim);
 		} else
 			iterations = tcrypt_kdf[i].iterations;
-
 		/* Derive header key */
 		log_dbg(cd, "TCRYPT: trying KDF: %s-%s-%d%s.",
 			tcrypt_kdf[i].name, tcrypt_kdf[i].hash, tcrypt_kdf[i].iterations,
@@ -594,24 +600,28 @@ static int TCRYPT_init_hdr(struct crypt_device *cd,
 		if (r < 0) {
 			log_verbose(cd, _("PBKDF2 hash algorithm %s not available, skipping."),
 				      tcrypt_kdf[i].hash);
+			skipped++;
+			r = -EPERM;
 			continue;
 		}
 
 		/* Decrypt header */
-		r = TCRYPT_decrypt_hdr(cd, hdr, key, params->flags);
+		r = TCRYPT_decrypt_hdr(cd, hdr, key, params);
 		if (r == -ENOENT) {
 			skipped++;
 			r = -EPERM;
+			continue;
 		}
 		if (r != -EPERM)
 			break;
 	}
 
-	if ((r < 0 && r != -EPERM && skipped && skipped == i) || r == -ENOTSUP) {
+	if ((r < 0 && skipped && skipped == i) || r == -ENOTSUP) {
 		log_err(cd, _("Required kernel crypto interface not available."));
 #ifdef ENABLE_AF_ALG
 		log_err(cd, _("Ensure you have algif_skcipher kernel module loaded."));
 #endif
+		r = -ENOTSUP;
 	}
 	if (r < 0)
 		goto out;
@@ -820,7 +830,10 @@ int TCRYPT_activate(struct crypt_device *cd,
 			strncpy(dm_name, name, sizeof(dm_name)-1);
 			dmd.flags = flags;
 		} else {
-			snprintf(dm_name, sizeof(dm_name), "%s_%d", name, i-1);
+			if (snprintf(dm_name, sizeof(dm_name), "%s_%d", name, i-1) < 0) {
+				r = -EINVAL;
+				break;
+			}
 			dmd.flags = flags | CRYPT_ACTIVATE_PRIVATE;
 		}
 
@@ -828,8 +841,10 @@ int TCRYPT_activate(struct crypt_device *cd,
 				vk->key, hdr->d.keys);
 
 		if (algs->chain_count != i) {
-			snprintf(dm_dev_name, sizeof(dm_dev_name), "%s/%s_%d",
-				 dm_get_dir(), name, i);
+			if (snprintf(dm_dev_name, sizeof(dm_dev_name), "%s/%s_%d", dm_get_dir(), name, i) < 0) {
+				r = -EINVAL;
+				break;
+			}
 			r = device_alloc(cd, &device, dm_dev_name);
 			if (r)
 				break;
@@ -1022,18 +1037,13 @@ uint64_t TCRYPT_get_data_offset(struct crypt_device *cd,
 {
 	uint64_t size;
 
-	/* No real header loaded, initialized by active device */
-	if (!hdr->d.version)
-		goto hdr_offset;
-
-	/* Mapping through whole device, not partition! */
-	if (params->flags & CRYPT_TCRYPT_SYSTEM_HEADER) {
+	if (!hdr->d.version) {
+		/* No real header loaded, initialized by active device, use default mk_offset */
+	} else if (params->flags & CRYPT_TCRYPT_SYSTEM_HEADER) {
+		/* Mapping through whole device, not partition! */
 		if (crypt_dev_is_partition(device_path(crypt_data_device(cd))))
 			return 0;
-		goto hdr_offset;
-	}
-
-	if (params->mode && !strncmp(params->mode, "xts", 3)) {
+	} else if (params->mode && !strncmp(params->mode, "xts", 3)) {
 		if (hdr->d.version < 3)
 			return 1;
 
@@ -1045,17 +1055,13 @@ uint64_t TCRYPT_get_data_offset(struct crypt_device *cd,
 			return (size - hdr->d.hidden_volume_size +
 				(TCRYPT_HDR_HIDDEN_OFFSET_OLD)) / SECTOR_SIZE;
 		}
-		goto hdr_offset;
-	}
-
-	if (params->flags & CRYPT_TCRYPT_HIDDEN_HEADER) {
+	} else if (params->flags & CRYPT_TCRYPT_HIDDEN_HEADER) {
 		if (device_size(crypt_metadata_device(cd), &size) < 0)
 			return 0;
 		return (size - hdr->d.hidden_volume_size +
 			(TCRYPT_HDR_HIDDEN_OFFSET_OLD)) / SECTOR_SIZE;
 	}
 
-hdr_offset:
 	return hdr->d.mk_offset / SECTOR_SIZE;
 }
 

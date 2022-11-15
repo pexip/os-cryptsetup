@@ -1,8 +1,8 @@
 /*
  * Linux kernel userspace API crypto backend implementation
  *
- * Copyright (C) 2010-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2021 Milan Broz
+ * Copyright (C) 2010-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2022 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,7 +29,6 @@
 #include <linux/if_alg.h>
 #include "crypto_backend_internal.h"
 
-/* FIXME: remove later */
 #ifndef AF_ALG
 #define AF_ALG 38
 #endif
@@ -118,7 +117,7 @@ static int crypt_kernel_socket_init(struct sockaddr_alg *sa, int *tfmfd, int *op
 	return 0;
 }
 
-int crypt_backend_init(void)
+int crypt_backend_init(bool fips __attribute__((unused)))
 {
 	struct utsname uts;
 	struct sockaddr_alg sa = {
@@ -330,7 +329,8 @@ void crypt_hmac_destroy(struct crypt_hmac *ctx)
 }
 
 /* RNG - N/A */
-int crypt_backend_rng(char *buffer, size_t length, int quality, int fips)
+int crypt_backend_rng(char *buffer __attribute__((unused)), size_t length __attribute__((unused)),
+	int quality __attribute__((unused)), int fips __attribute__((unused)))
 {
 	return -EINVAL;
 }
@@ -403,7 +403,7 @@ int crypt_cipher_decrypt(struct crypt_cipher *ctx,
 	return crypt_cipher_decrypt_kernel(&ctx->ck, in, out, length, iv, iv_length);
 }
 
-bool crypt_cipher_kernel_only(struct crypt_cipher *ctx)
+bool crypt_cipher_kernel_only(struct crypt_cipher *ctx __attribute__((unused)))
 {
 	return true;
 }
@@ -415,4 +415,9 @@ int crypt_bitlk_decrypt_key(const void *key, size_t key_length,
 {
 	return crypt_bitlk_decrypt_key_kernel(key, key_length, in, out, length,
 					      iv, iv_length, tag, tag_length);
+}
+
+int crypt_backend_memeq(const void *m1, const void *m2, size_t n)
+{
+	return crypt_internal_memeq(m1, m2, n);
 }

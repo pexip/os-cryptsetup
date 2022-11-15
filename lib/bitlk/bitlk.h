@@ -1,9 +1,9 @@
 /*
  * BITLK (BitLocker-compatible) header definition
  *
- * Copyright (C) 2019-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2019-2021 Milan Broz
- * Copyright (C) 2019-2021 Vojtech Trefny
+ * Copyright (C) 2019-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2019-2022 Milan Broz
+ * Copyright (C) 2019-2022 Vojtech Trefny
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,6 +29,7 @@
 
 struct crypt_device;
 struct device;
+struct volume_key;
 
 #define BITLK_NONCE_SIZE 12
 #define BITLK_SALT_SIZE 16
@@ -60,6 +61,7 @@ typedef enum {
 	BITLK_ENTRY_TYPE_STARTUP_KEY = 0x0006,
 	BITLK_ENTRY_TYPE_DESCRIPTION = 0x0007,
 	BITLK_ENTRY_TYPE_VOLUME_HEADER = 0x000f,
+	BITLK_ENTRY_TYPE_VOLUME_GUID = 0x0019,
 } BITLKFVEEntryType;
 
 typedef enum {
@@ -75,6 +77,7 @@ typedef enum {
 	BITLK_ENTRY_VALUE_EXTERNAL_KEY = 0x0009,
 	BITLK_ENTRY_VALUE_OFFSET_SIZE = 0x000f,
 	BITLK_ENTRY_VALUE_RECOVERY_TIME = 0x015,
+	BITLK_ENTRY_VALUE_GUID = 0x0017,
 } BITLKFVEEntryValue;
 
 struct bitlk_vmk {
@@ -96,6 +99,7 @@ struct bitlk_fvek {
 
 struct bitlk_metadata {
 	uint16_t sector_size;
+	uint64_t volume_size;
 	bool togo;
 	bool state;
 	BITLKEncryptionType type;
@@ -117,12 +121,25 @@ int BITLK_read_sb(struct crypt_device *cd, struct bitlk_metadata *params);
 
 int BITLK_dump(struct crypt_device *cd, struct device *device, struct bitlk_metadata *params);
 
-int BITLK_activate(struct crypt_device *cd,
-		   const char *name,
-		   const char *password,
-		   size_t passwordLen,
-		   const struct bitlk_metadata *params,
-		   uint32_t flags);
+int BITLK_get_volume_key(struct crypt_device *cd,
+			 const char *password,
+			 size_t passwordLen,
+			 const struct bitlk_metadata *params,
+			 struct volume_key **open_fvek_key);
+
+int BITLK_activate_by_passphrase(struct crypt_device *cd,
+				 const char *name,
+				 const char *password,
+				 size_t passwordLen,
+				 const struct bitlk_metadata *params,
+				 uint32_t flags);
+
+int BITLK_activate_by_volume_key(struct crypt_device *cd,
+				 const char *name,
+				 const char *volume_key,
+				 size_t volume_key_size,
+				 const struct bitlk_metadata *params,
+				 uint32_t flags);
 
 void BITLK_bitlk_fvek_free(struct bitlk_fvek *fvek);
 void BITLK_bitlk_vmk_free(struct bitlk_vmk *vmk);

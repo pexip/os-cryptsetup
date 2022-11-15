@@ -1,7 +1,7 @@
 /*
  * FIPS mode utilities
  *
- * Copyright (C) 2011-2021 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2011-2022 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,6 +21,8 @@
 #ifndef _UTILS_FIPS_H
 #define _UTILS_FIPS_H
 
-int crypt_fips_mode(void);
+#include <stdbool.h>
+
+bool crypt_fips_mode(void);
 
 #endif /* _UTILS_FIPS_H */

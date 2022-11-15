@@ -23,12 +23,16 @@ if [ -f /etc/os-release ] ; then
 fi
 
 echo "Memory"
-free -h
+free -m
 
 pversion cryptsetup
 pversion veritysetup
 pversion integritysetup
-pversion cryptsetup-reencrypt
+
+[ -x $CRYPTSETUP_PATH/cryptsetup ] && {
+	echo -e "Cryptsetup defaults:"
+	$CRYPTSETUP_PATH/cryptsetup --help | sed -n '/optional key file for/,$p' | tail -n +3
+}
 
 [ $(id -u) != 0 ] && exit 77
 

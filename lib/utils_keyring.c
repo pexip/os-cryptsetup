@@ -1,8 +1,8 @@
 /*
  * kernel keyring utilities
  *
- * Copyright (C) 2016-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2016-2021 Ondrej Kozina
+ * Copyright (C) 2016-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Ondrej Kozina
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -26,15 +26,12 @@
 #include <sys/syscall.h>
 
 #include "libcryptsetup.h"
+#include "libcryptsetup_macros.h"
 #include "utils_keyring.h"
 
 #ifndef HAVE_KEY_SERIAL_T
 #define HAVE_KEY_SERIAL_T
 typedef int32_t key_serial_t;
-#endif
-
-#ifndef ARRAY_SIZE
-# define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
 #ifdef KERNEL_KEYRING
