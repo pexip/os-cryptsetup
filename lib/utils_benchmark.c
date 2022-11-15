@@ -1,8 +1,8 @@
 /*
  * libcryptsetup - cryptsetup library, cipher benchmark
  *
- * Copyright (C) 2012-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2021 Milan Broz
+ * Copyright (C) 2012-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2022 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -184,7 +184,7 @@ int crypt_benchmark_pbkdf_internal(struct crypt_device *cd,
 		pbkdf->parallel_threads = 0; /* N/A in PBKDF2 */
 		pbkdf->max_memory_kb = 0; /* N/A in PBKDF2 */
 
-		r = crypt_benchmark_pbkdf(cd, pbkdf, "foo", 3, "bar", 3,
+		r = crypt_benchmark_pbkdf(cd, pbkdf, "foo", 3, "01234567890abcdef", 16,
 					volume_key_size, &benchmark_callback, &u);
 		pbkdf->time_ms = ms_tmp;
 		if (r < 0) {
@@ -196,7 +196,7 @@ int crypt_benchmark_pbkdf_internal(struct crypt_device *cd,
 		PBKDF2_tmp = ((double)pbkdf->iterations * pbkdf->time_ms / 1000.);
 		if (PBKDF2_tmp > (double)UINT32_MAX)
 			return -EINVAL;
-		pbkdf->iterations = at_least((uint32_t)PBKDF2_tmp, pbkdf_limits.min_iterations);
+		pbkdf->iterations = AT_LEAST((uint32_t)PBKDF2_tmp, pbkdf_limits.min_iterations);
 	} else {
 		/* Already benchmarked */
 		if (pbkdf->iterations) {

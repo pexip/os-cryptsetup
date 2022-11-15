@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2, LUKS2 header format code
  *
- * Copyright (C) 2015-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2021 Milan Broz
+ * Copyright (C) 2015-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2022 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -30,7 +30,7 @@ struct area {
 
 static size_t get_area_size(size_t keylength)
 {
-	//FIXME: calculate this properly, for now it is AF_split_sectors
+	/* for now it is AF_split_sectors */
 	return size_round_up(keylength * 4000, 4096);
 }
 
@@ -177,8 +177,11 @@ int LUKS2_find_area_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
 
 	log_dbg(cd, "Found area %zu -> %zu", offset, length + offset);
 
-	*area_offset = offset;
-	*area_length = length;
+	if (area_offset)
+		*area_offset = offset;
+	if (area_length)
+		*area_length = length;
+
 	return 0;
 }
 
@@ -380,10 +383,7 @@ int LUKS2_wipe_header_areas(struct crypt_device *cd,
 				 offset, length, wipe_block, NULL, NULL);
 }
 
-/* FIXME: what if user wanted to keep original keyslots size? */
-int LUKS2_set_keyslots_size(struct crypt_device *cd,
-		struct luks2_hdr *hdr,
-		uint64_t data_offset)
+int LUKS2_set_keyslots_size(struct luks2_hdr *hdr, uint64_t data_offset)
 {
 	json_object *jobj_config;
 	uint64_t keyslots_size;

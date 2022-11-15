@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2021 Milan Broz
+ * Copyright (C) 2009-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2022 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -129,9 +129,10 @@ void crypt_free(struct crypt_device *cd);
  * other values mean accepted.
  *
  * @param cd crypt device handle
- * @param confirm user defined confirm callback reference
+ * @param confirm user defined confirm callback reference; use
+ *        @p msg for message for user to confirm and
+ *        @p usrptr for identification in callback
  * @param usrptr provided identification in callback
- * @param msg Message for user to confirm
  *
  * @note Current version of cryptsetup API requires confirmation for UUID change and
  *	 LUKS header restore only.
@@ -196,10 +197,11 @@ int crypt_set_data_offset(struct crypt_device *cd, uint64_t data_offset);
  * Set log function.
  *
  * @param cd crypt device handle (can be @e NULL to set default log function)
- * @param log user defined log function reference
+ * @param log user defined log function reference; use
+ *        @p level for log level,
+ *        @p msg for message, and
+ *        @p usrptr for identification in callback
  * @param usrptr provided identification in callback
- * @param level log level below (debug messages can uses other levels)
- * @param msg log message
  */
 void crypt_set_log_callback(struct crypt_device *cd,
 	void (*log)(int level, const char *msg, void *usrptr),
@@ -215,6 +217,15 @@ void crypt_set_log_callback(struct crypt_device *cd,
  * @param msg log message
  */
 void crypt_log(struct crypt_device *cd, int level, const char *msg);
+
+/**
+ * Log function with variable arguments.
+ *
+ * @param cd crypt device handle
+ * @param level log level
+ * @param format formatted log message
+ */
+void crypt_logf(struct crypt_device *cd, int level, const char *format, ...);
 /** @} */
 
 /**
@@ -260,9 +271,9 @@ struct crypt_pbkdf_type {
 };
 
 /** Iteration time set by crypt_set_iteration_time(), for compatibility only. */
-#define CRYPT_PBKDF_ITER_TIME_SET   (1 << 0)
+#define CRYPT_PBKDF_ITER_TIME_SET   (UINT32_C(1) << 0)
 /** Never run benchmarks, use pre-set value or defaults. */
-#define CRYPT_PBKDF_NO_BENCHMARK    (1 << 1)
+#define CRYPT_PBKDF_NO_BENCHMARK    (UINT32_C(1) << 1)
 
 /** PBKDF2 according to RFC2898, LUKS1 legacy */
 #define CRYPT_KDF_PBKDF2   "pbkdf2"
@@ -502,13 +513,13 @@ struct crypt_params_verity {
 };
 
 /** No on-disk header (only hashes) */
-#define CRYPT_VERITY_NO_HEADER   (1 << 0)
+#define CRYPT_VERITY_NO_HEADER   (UINT32_C(1) << 0)
 /** Verity hash in userspace before activation */
-#define CRYPT_VERITY_CHECK_HASH  (1 << 1)
+#define CRYPT_VERITY_CHECK_HASH  (UINT32_C(1) << 1)
 /** Create hash - format hash device */
-#define CRYPT_VERITY_CREATE_HASH (1 << 2)
+#define CRYPT_VERITY_CREATE_HASH (UINT32_C(1) << 2)
 /** Root hash signature required for activation */
-#define CRYPT_VERITY_ROOT_HASH_SIGNATURE (1 << 3)
+#define CRYPT_VERITY_ROOT_HASH_SIGNATURE (UINT32_C(1) << 3)
 
 /**
  *
@@ -531,18 +542,18 @@ struct crypt_params_tcrypt {
 };
 
 /** Include legacy modes when scanning for header */
-#define CRYPT_TCRYPT_LEGACY_MODES    (1 << 0)
+#define CRYPT_TCRYPT_LEGACY_MODES    (UINT32_C(1) << 0)
 /** Try to load hidden header (describing hidden device) */
-#define CRYPT_TCRYPT_HIDDEN_HEADER   (1 << 1)
+#define CRYPT_TCRYPT_HIDDEN_HEADER   (UINT32_C(1) << 1)
 /** Try to load backup header */
-#define CRYPT_TCRYPT_BACKUP_HEADER   (1 << 2)
+#define CRYPT_TCRYPT_BACKUP_HEADER   (UINT32_C(1) << 2)
 /** Device contains encrypted system (with boot loader) */
-#define CRYPT_TCRYPT_SYSTEM_HEADER   (1 << 3)
+#define CRYPT_TCRYPT_SYSTEM_HEADER   (UINT32_C(1) << 3)
 /** Include VeraCrypt modes when scanning for header,
  *  all other TCRYPT flags applies as well.
  *  VeraCrypt device is reported as TCRYPT type.
  */
-#define CRYPT_TCRYPT_VERA_MODES      (1 << 4)
+#define CRYPT_TCRYPT_VERA_MODES      (UINT32_C(1) << 4)
 
 /**
  *
@@ -590,7 +601,7 @@ struct crypt_params_luks2 {
 	const struct crypt_params_integrity *integrity_params; /**< Data integrity parameters or @e NULL*/
 	size_t data_alignment;   /**< data area alignment in 512B sectors, data offset is multiple of this */
 	const char *data_device; /**< detached encrypted data device or @e NULL */
-	uint32_t sector_size;    /**< encryption sector size */
+	uint32_t sector_size;    /**< encryption sector size, 0 triggers auto-detection for optimal encryption sector size */
 	const char *label;       /**< header label or @e NULL*/
 	const char *subsystem;   /**< header subsystem label or @e NULL*/
 };
@@ -651,11 +662,11 @@ void crypt_set_compatibility(struct crypt_device *cd, uint32_t flags);
 uint32_t crypt_get_compatibility(struct crypt_device *cd);
 
 /** dm-integrity device uses less effective (legacy) padding (old kernels) */
-#define CRYPT_COMPAT_LEGACY_INTEGRITY_PADDING (1 << 0)
+#define CRYPT_COMPAT_LEGACY_INTEGRITY_PADDING (UINT32_C(1) << 0)
 /** dm-integrity device does not protect superblock with HMAC (old kernels) */
-#define CRYPT_COMPAT_LEGACY_INTEGRITY_HMAC (1 << 1)
+#define CRYPT_COMPAT_LEGACY_INTEGRITY_HMAC (UINT32_C(1) << 1)
 /** dm-integrity allow recalculating of volumes with HMAC keys (old kernels) */
-#define CRYPT_COMPAT_LEGACY_INTEGRITY_RECALC (1 << 2)
+#define CRYPT_COMPAT_LEGACY_INTEGRITY_RECALC (UINT32_C(1) << 2)
 
 /**
  * Convert to new type for already existing device.
@@ -708,6 +719,24 @@ int crypt_set_label(struct crypt_device *cd,
 	const char *subsystem);
 
 /**
+ * Get the label of an existing device.
+ *
+ * @param cd crypt device handle
+ *
+ * @return label, or @e NULL otherwise
+ */
+const char *crypt_get_label(struct crypt_device *cd);
+
+/**
+ * Get the subsystem of an existing device.
+ *
+ * @param cd crypt device handle
+ *
+ * @return subsystem, or @e NULL otherwise
+ */
+const char *crypt_get_subsystem(struct crypt_device *cd);
+
+/**
  * Enable or disable loading of volume keys via kernel keyring. When set to
  * 'enabled' library loads key in kernel keyring first and pass the key
  * description to dm-crypt instead of binary key copy. If set to 'disabled'
@@ -738,7 +767,8 @@ int crypt_volume_key_keyring(struct crypt_device *cd, int enable);
  * @post In case LUKS header is read successfully but payload device is too small
  * error is returned and device type in context is set to @e NULL
  *
- * @note Note that in current version load works only for LUKS and VERITY device type.
+ * @note Note that load works only for device types with on-disk metadata.
+ * @note Function does not print visible error message if metadata is not present.
  *
  */
 int crypt_load(struct crypt_device *cd,
@@ -870,6 +900,43 @@ int crypt_resume_by_volume_key(struct crypt_device *cd,
 	const char *name,
 	const char *volume_key,
 	size_t volume_key_size);
+/**
+ * Resume crypt device using LUKS2 token.
+ *
+ * @param cd LUKS2 crypt device handle
+ * @param name name of device to resume
+ * @param type restrict type of token, if @e NULL all types are allowed
+ * @param pin passphrase (or PIN) to unlock token (may be binary data)
+ * @param pin_size size of @e pin
+ * @param usrptr provided identification in callback
+ *
+ * @return unlocked key slot number or negative errno otherwise.
+ *
+ * @note EPERM errno means token provided passphrase successfully, but
+ *       passphrase did not unlock any keyslot associated with the token.
+ *
+ * @note ENOENT errno means no token (or subsequently assigned keyslot) was
+ *       eligible to resume LUKS2 device.
+ *
+ * @note ENOANO errno means that token is PIN protected and was either missing
+ *       (NULL) or wrong.
+ *
+ * @note Negative EAGAIN errno means token handler requires additional hardware
+ *       not present in the system to unlock keyslot.
+ *
+ * @note with @param token set to CRYPT_ANY_TOKEN libcryptsetup runs best effort loop
+ *       to resume device using any available token. It may happen that various token handlers
+ *       return different error codes. At the end loop returns error codes in the following
+ *       order (from the most significant to the least) any negative errno except those
+ *       listed below, non negative token id (success), -ENOANO, -EAGAIN, -EPERM, -ENOENT.
+ */
+int crypt_resume_by_token_pin(struct crypt_device *cd,
+	const char *name,
+	const char *type,
+	int token,
+	const char *pin,
+	size_t pin_size,
+	void *usrptr);
 /** @} */
 
 /**
@@ -994,13 +1061,13 @@ int crypt_keyslot_add_by_volume_key(struct crypt_device *cd,
 	size_t passphrase_size);
 
 /** create keyslot with volume key not associated with current dm-crypt segment */
-#define CRYPT_VOLUME_KEY_NO_SEGMENT (1 << 0)
+#define CRYPT_VOLUME_KEY_NO_SEGMENT (UINT32_C(1) << 0)
 
 /** create keyslot with new volume key and assign it to current dm-crypt segment */
-#define CRYPT_VOLUME_KEY_SET (1 << 1)
+#define CRYPT_VOLUME_KEY_SET (UINT32_C(1) << 1)
 
 /** Assign key to first matching digest before creating new digest */
-#define CRYPT_VOLUME_KEY_DIGEST_REUSE (1 << 2)
+#define CRYPT_VOLUME_KEY_DIGEST_REUSE (UINT32_C(1) << 2)
 
 /**
  * Add key slot using provided key.
@@ -1062,57 +1129,59 @@ int crypt_keyslot_destroy(struct crypt_device *cd, int keyslot);
  */
 
 /** device is read only */
-#define CRYPT_ACTIVATE_READONLY (1 << 0)
+#define CRYPT_ACTIVATE_READONLY (UINT32_C(1) << 0)
 /** only reported for device without uuid */
-#define CRYPT_ACTIVATE_NO_UUID  (1 << 1)
+#define CRYPT_ACTIVATE_NO_UUID  (UINT32_C(1) << 1)
 /** activate even if cannot grant exclusive access (DANGEROUS) */
-#define CRYPT_ACTIVATE_SHARED   (1 << 2)
+#define CRYPT_ACTIVATE_SHARED   (UINT32_C(1) << 2)
 /** enable discards aka TRIM */
-#define CRYPT_ACTIVATE_ALLOW_DISCARDS (1 << 3)
+#define CRYPT_ACTIVATE_ALLOW_DISCARDS (UINT32_C(1) << 3)
 /** skip global udev rules in activation ("private device"), input only */
-#define CRYPT_ACTIVATE_PRIVATE (1 << 4)
+#define CRYPT_ACTIVATE_PRIVATE (UINT32_C(1) << 4)
 /** corruption detected (verity), output only */
-#define CRYPT_ACTIVATE_CORRUPTED (1 << 5)
+#define CRYPT_ACTIVATE_CORRUPTED (UINT32_C(1) << 5)
 /** use same_cpu_crypt option for dm-crypt */
-#define CRYPT_ACTIVATE_SAME_CPU_CRYPT (1 << 6)
+#define CRYPT_ACTIVATE_SAME_CPU_CRYPT (UINT32_C(1) << 6)
 /** use submit_from_crypt_cpus for dm-crypt */
-#define CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS (1 << 7)
+#define CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS (UINT32_C(1) << 7)
 /** dm-verity: ignore_corruption flag - ignore corruption, log it only */
-#define CRYPT_ACTIVATE_IGNORE_CORRUPTION (1 << 8)
+#define CRYPT_ACTIVATE_IGNORE_CORRUPTION (UINT32_C(1) << 8)
 /** dm-verity: restart_on_corruption flag - restart kernel on corruption */
-#define CRYPT_ACTIVATE_RESTART_ON_CORRUPTION (1 << 9)
+#define CRYPT_ACTIVATE_RESTART_ON_CORRUPTION (UINT32_C(1) << 9)
 /** dm-verity: ignore_zero_blocks - do not verify zero blocks */
-#define CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS (1 << 10)
+#define CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS (UINT32_C(1) << 10)
 /** key loaded in kernel keyring instead directly in dm-crypt */
-#define CRYPT_ACTIVATE_KEYRING_KEY (1 << 11)
+#define CRYPT_ACTIVATE_KEYRING_KEY (UINT32_C(1) << 11)
 /** dm-integrity: direct writes, do not use journal */
-#define CRYPT_ACTIVATE_NO_JOURNAL (1 << 12)
+#define CRYPT_ACTIVATE_NO_JOURNAL (UINT32_C(1) << 12)
 /** dm-integrity: recovery mode - no journal, no integrity checks */
-#define CRYPT_ACTIVATE_RECOVERY (1 << 13)
+#define CRYPT_ACTIVATE_RECOVERY (UINT32_C(1) << 13)
 /** ignore persistently stored flags */
-#define CRYPT_ACTIVATE_IGNORE_PERSISTENT (1 << 14)
+#define CRYPT_ACTIVATE_IGNORE_PERSISTENT (UINT32_C(1) << 14)
 /** dm-verity: check_at_most_once - check data blocks only the first time */
-#define CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE (1 << 15)
+#define CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE (UINT32_C(1) << 15)
 /** allow activation check including unbound keyslots (keyslots without segments) */
-#define CRYPT_ACTIVATE_ALLOW_UNBOUND_KEY (1 << 16)
+#define CRYPT_ACTIVATE_ALLOW_UNBOUND_KEY (UINT32_C(1) << 16)
 /** dm-integrity: activate automatic recalculation */
-#define CRYPT_ACTIVATE_RECALCULATE (1 << 17)
+#define CRYPT_ACTIVATE_RECALCULATE (UINT32_C(1) << 17)
 /** reactivate existing and update flags, input only */
-#define CRYPT_ACTIVATE_REFRESH	(1 << 18)
+#define CRYPT_ACTIVATE_REFRESH	(UINT32_C(1) << 18)
 /** Use global lock to serialize memory hard KDF on activation (OOM workaround) */
-#define CRYPT_ACTIVATE_SERIALIZE_MEMORY_HARD_PBKDF (1 << 19)
+#define CRYPT_ACTIVATE_SERIALIZE_MEMORY_HARD_PBKDF (UINT32_C(1) << 19)
 /** dm-integrity: direct writes, use bitmap to track dirty sectors */
-#define CRYPT_ACTIVATE_NO_JOURNAL_BITMAP (1 << 20)
+#define CRYPT_ACTIVATE_NO_JOURNAL_BITMAP (UINT32_C(1) << 20)
 /** device is suspended (key should be wiped from memory), output only */
-#define CRYPT_ACTIVATE_SUSPENDED (1 << 21)
+#define CRYPT_ACTIVATE_SUSPENDED (UINT32_C(1) << 21)
 /** use IV sector counted in sector_size instead of default 512 bytes sectors */
-#define CRYPT_ACTIVATE_IV_LARGE_SECTORS (1 << 22)
+#define CRYPT_ACTIVATE_IV_LARGE_SECTORS (UINT32_C(1) << 22)
 /** dm-verity: panic_on_corruption flag - panic kernel on corruption */
-#define CRYPT_ACTIVATE_PANIC_ON_CORRUPTION (1 << 23)
+#define CRYPT_ACTIVATE_PANIC_ON_CORRUPTION (UINT32_C(1) << 23)
 /** dm-crypt: bypass internal workqueue and process read requests synchronously. */
-#define CRYPT_ACTIVATE_NO_READ_WORKQUEUE (1 << 24)
+#define CRYPT_ACTIVATE_NO_READ_WORKQUEUE (UINT32_C(1) << 24)
 /** dm-crypt: bypass internal workqueue and process write requests synchronously. */
-#define CRYPT_ACTIVATE_NO_WRITE_WORKQUEUE (1 << 25)
+#define CRYPT_ACTIVATE_NO_WRITE_WORKQUEUE (UINT32_C(1) << 25)
+/** dm-integrity: reset automatic recalculation */
+#define CRYPT_ACTIVATE_RECALCULATE_RESET (UINT32_C(1) << 26)
 
 /**
  * Active device runtime attributes
@@ -1161,11 +1230,11 @@ uint64_t crypt_get_active_integrity_failures(struct crypt_device *cd,
  * LUKS2 header requirements
  */
 /** Unfinished offline reencryption */
-#define CRYPT_REQUIREMENT_OFFLINE_REENCRYPT	(1 << 0)
+#define CRYPT_REQUIREMENT_OFFLINE_REENCRYPT	(UINT32_C(1) << 0)
 /** Online reencryption in-progress */
-#define CRYPT_REQUIREMENT_ONLINE_REENCRYPT	(1 << 1)
+#define CRYPT_REQUIREMENT_ONLINE_REENCRYPT	(UINT32_C(1) << 1)
 /** unknown requirement in header (output only) */
-#define CRYPT_REQUIREMENT_UNKNOWN		(1 << 31)
+#define CRYPT_REQUIREMENT_UNKNOWN		(UINT32_C(1) << 31)
 
 /**
  * Persistent flags type
@@ -1295,8 +1364,8 @@ int crypt_activate_by_keyfile(struct crypt_device *cd,
  * @note For VERITY the volume key means root hash required for activation.
  * 	 Because kernel dm-verity is always read only, you have to provide
  * 	 CRYPT_ACTIVATE_READONLY flag always.
- * @note For TCRYPT the volume key should be always NULL and because master
- * 	 key from decrypted header is used instead.
+ * @note For TCRYPT the volume key should be always NULL
+ * 	 the key from decrypted header is used instead.
  */
 int crypt_activate_by_volume_key(struct crypt_device *cd,
 	const char *name,
@@ -1352,9 +1421,11 @@ int crypt_activate_by_keyring(struct crypt_device *cd,
 	uint32_t flags);
 
 /** lazy deactivation - remove once last user releases it */
-#define CRYPT_DEACTIVATE_DEFERRED (1 << 0)
+#define CRYPT_DEACTIVATE_DEFERRED (UINT32_C(1) << 0)
 /** force deactivation - if the device is busy, it is replaced by error device */
-#define CRYPT_DEACTIVATE_FORCE    (1 << 1)
+#define CRYPT_DEACTIVATE_FORCE    (UINT32_C(1) << 1)
+/** if set, remove lazy deactivation */
+#define CRYPT_DEACTIVATE_DEFERRED_CANCEL (UINT32_C(1) << 2)
 
 /**
  * Deactivate crypt device. This function tries to remove active device-mapper
@@ -1416,6 +1487,10 @@ int crypt_volume_key_get(struct crypt_device *cd,
  * @param volume_key_size size of @e volume_key
  *
  * @return @e 0 on success or negative errno value otherwise.
+ *
+ * @note Negative EPERM return value means that passed volume_key
+ * 	 did not pass digest verification routine (not a valid volume
+ * 	 key).
  */
 int crypt_volume_key_verify(struct crypt_device *cd,
 	const char *volume_key,
@@ -1457,6 +1532,17 @@ crypt_status_info crypt_status(struct crypt_device *cd, const char *name);
  * @return @e 0 on success or negative errno value otherwise.
  */
 int crypt_dump(struct crypt_device *cd);
+
+/**
+ * Dump JSON-formatted information about LUKS2 device
+ *
+ * @param cd crypt device handle (only LUKS2 format supported)
+ * @param json buffer with JSON, if NULL use log callback for output
+ * @param flags dump flags (reserved)
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ */
+int crypt_dump_json(struct crypt_device *cd, const char **json, uint32_t flags);
 
 /**
  * Get cipher used in device.
@@ -1549,6 +1635,21 @@ int crypt_get_volume_key_size(struct crypt_device *cd);
  *
  */
 int crypt_get_sector_size(struct crypt_device *cd);
+
+/**
+ * Check if initialized LUKS context uses detached header
+ * (LUKS header located on a different device than data.)
+ *
+ * @param cd crypt device handle
+ *
+ * @return @e 1 if detached header is used, @e 0 if not
+ * or negative errno value otherwise.
+ *
+ * @note This is a runtime attribute, it does not say
+ * 	 if a LUKS device requires detached header.
+ * 	 This function works only with LUKS devices.
+ */
+int crypt_header_is_detached(struct crypt_device *cd);
 
 /**
  * Get device parameters for VERITY device.
@@ -1882,7 +1983,7 @@ int crypt_keyfile_read(struct crypt_device *cd,
 	uint32_t flags);
 
 /** Read key only to the first end of line (\\n). */
-#define CRYPT_KEYFILE_STOP_EOL   (1 << 0)
+#define CRYPT_KEYFILE_STOP_EOL   (UINT32_C(1) << 0)
 /** @} */
 
 /**
@@ -1896,7 +1997,7 @@ int crypt_keyfile_read(struct crypt_device *cd,
 typedef enum {
 	CRYPT_WIPE_ZERO,           /**< Fill with zeroes */
 	CRYPT_WIPE_RANDOM,         /**< Use RNG to fill data */
-	CRYPT_WIPE_ENCRYPTED_ZERO, /**< Add encryption and fill with zeroes as plaintext */
+	CRYPT_WIPE_ENCRYPTED_ZERO, /**< Obsolete, same as CRYPT_WIPE_RANDOM */
 	CRYPT_WIPE_SPECIAL,        /**< Compatibility only, do not use (Gutmann method) */
 } crypt_wipe_pattern;
 
@@ -1932,7 +2033,7 @@ int crypt_wipe(struct crypt_device *cd,
 );
 
 /** Use direct-io */
-#define CRYPT_WIPE_NO_DIRECT_IO (1 << 0)
+#define CRYPT_WIPE_NO_DIRECT_IO (UINT32_C(1) << 0)
 /** @} */
 
 /**
@@ -1946,6 +2047,19 @@ int crypt_wipe(struct crypt_device *cd,
  * @addtogroup crypt-tokens
  * @{
  */
+
+/**
+ * Get number of tokens supported for device type.
+ *
+ * @param type crypt device type
+ *
+ * @return token count or negative errno otherwise if device
+ * doesn't not support tokens.
+ *
+ * @note Real number of supported tokens for a particular device depends
+ *       on usable metadata area size.
+ */
+int crypt_token_max(const char *type);
 
 /** Iterate through all tokens */
 #define CRYPT_ANY_TOKEN -1
@@ -2104,10 +2218,51 @@ int crypt_token_is_assigned(struct crypt_device *cd,
  * @param buffer returned allocated buffer with password
  * @param buffer_len length of the buffer
  * @param usrptr user data in @link crypt_activate_by_token @endlink
+ *
+ * @return 0 on success (token passed LUKS2 keyslot passphrase in buffer) or
+ *         negative errno otherwise.
+ *
+ * @note Negative ENOANO errno means that token is PIN protected and caller should
+ *       use @link crypt_activate_by_token_pin @endlink with PIN provided.
+ *
+ * @note Negative EAGAIN errno means token handler requires additional hardware
+ *       not present in the system.
  */
 typedef int (*crypt_token_open_func) (
 	struct crypt_device *cd,
 	int token,
+	char **buffer,
+	size_t *buffer_len,
+	void *usrptr);
+
+/**
+ * Token handler open with passphrase/PIN function prototype.
+ * This function retrieves password from a token and return allocated buffer
+ * containing this password. This buffer has to be deallocated by calling
+ * free() function and content should be wiped before deallocation.
+ *
+ * @param cd crypt device handle
+ * @param token token id
+ * @param pin passphrase (or PIN) to unlock token (may be binary data)
+ * @param pin_size size of @e pin
+ * @param buffer returned allocated buffer with password
+ * @param buffer_len length of the buffer
+ * @param usrptr user data in @link crypt_activate_by_token @endlink
+ *
+ * @return 0 on success (token passed LUKS2 keyslot passphrase in buffer) or
+ *         negative errno otherwise.
+ *
+ * @note Negative ENOANO errno means that token is PIN protected and PIN was
+ *       missing or wrong.
+ *
+ * @note Negative EAGAIN errno means token handler requires additional hardware
+ *       not present in the system.
+ */
+typedef int (*crypt_token_open_pin_func) (
+	struct crypt_device *cd,
+	int token,
+	const char *pin,
+	size_t pin_size,
 	char **buffer,
 	size_t *buffer_len,
 	void *usrptr);
@@ -2150,6 +2305,16 @@ typedef int (*crypt_token_validate_func) (struct crypt_device *cd, const char *j
 typedef void (*crypt_token_dump_func) (struct crypt_device *cd, const char *json);
 
 /**
+ * Token handler version function prototype.
+ * This function is supposed to return pointer to version string information.
+ *
+ * @note The returned string is advised to contain only version.
+ *	 For example '1.0.0' or 'v1.2.3.4'.
+ *
+ */
+typedef const char * (*crypt_token_version_func) (void);
+
+/**
  * Token handler
  */
 typedef struct  {
@@ -2170,6 +2335,35 @@ typedef struct  {
 int crypt_token_register(const crypt_token_handler *handler);
 
 /**
+ * Report configured path where library searches for external token handlers
+ *
+ * @return @e absolute path when external tokens are enabled or @e NULL otherwise.
+ */
+const char *crypt_token_external_path(void);
+
+/**
+ * Disable external token handlers (plugins) support
+ * If disabled, it cannot be enabled again.
+ */
+void crypt_token_external_disable(void);
+
+/** ABI version for external token in libcryptsetup-token-[name].so */
+#define CRYPT_TOKEN_ABI_VERSION1    "CRYPTSETUP_TOKEN_1.0"
+
+/** open by token - ABI exported symbol for external token (mandatory) */
+#define CRYPT_TOKEN_ABI_OPEN        "cryptsetup_token_open"
+/** open by token with PIN - ABI exported symbol for external token */
+#define CRYPT_TOKEN_ABI_OPEN_PIN    "cryptsetup_token_open_pin"
+/** deallocate callback - ABI exported symbol for external token */
+#define CRYPT_TOKEN_ABI_BUFFER_FREE "cryptsetup_token_buffer_free"
+/** validate token metadata - ABI exported symbol for external token */
+#define CRYPT_TOKEN_ABI_VALIDATE    "cryptsetup_token_validate"
+/** dump token metadata - ABI exported symbol for external token */
+#define CRYPT_TOKEN_ABI_DUMP        "cryptsetup_token_dump"
+/** token version - ABI exported symbol for external token */
+#define CRYPT_TOKEN_ABI_VERSION     "cryptsetup_token_version"
+
+/**
  * Activate device or check key using a token.
  *
  * @param cd crypt device handle
@@ -2179,10 +2373,69 @@ int crypt_token_register(const crypt_token_handler *handler);
  * @param flags activation flags
  *
  * @return unlocked key slot number or negative errno otherwise.
+ *
+ * @note EPERM errno means token provided passphrase successfully, but
+ *       passphrase did not unlock any keyslot associated with the token.
+ *
+ * @note ENOENT errno means no token (or subsequently assigned keyslot) was
+ *       eligible to unlock device.
+ *
+ * @note ENOANO errno means that token is PIN protected and you should call
+ *       @link crypt_activate_by_token_pin @endlink with PIN
+ *
+ * @note Negative EAGAIN errno means token handler requires additional hardware
+ *       not present in the system.
+ *
+ * @note with @e token set to CRYPT_ANY_TOKEN libcryptsetup runs best effort loop
+ *       to unlock device using any available token. It may happen that various token handlers
+ *       return different error codes. At the end loop returns error codes in the following
+ *       order (from the most significant to the least) any negative errno except those
+ *       listed below, non negative token id (success), -ENOANO, -EAGAIN, -EPERM, -ENOENT.
  */
 int crypt_activate_by_token(struct crypt_device *cd,
 	const char *name,
 	int token,
+	void *usrptr,
+	uint32_t flags);
+
+/**
+ * Activate device or check key using a token with PIN.
+ *
+ * @param cd crypt device handle
+ * @param name name of device to create, if @e NULL only check token
+ * @param type restrict type of token, if @e NULL all types are allowed
+ * @param token requested token to check or CRYPT_ANY_TOKEN to check all
+ * @param pin passphrase (or PIN) to unlock token (may be binary data)
+ * @param pin_size size of @e pin
+ * @param usrptr provided identification in callback
+ * @param flags activation flags
+ *
+ * @return unlocked key slot number or negative errno otherwise.
+ *
+ * @note EPERM errno means token provided passphrase successfully, but
+ *       passphrase did not unlock any keyslot associated with the token.
+ *
+ * @note ENOENT errno means no token (or subsequently assigned keyslot) was
+ *       eligible to unlock device.
+ *
+ * @note ENOANO errno means that token is PIN protected and was either missing
+ *       (NULL) or wrong.
+ *
+ * @note Negative EAGAIN errno means token handler requires additional hardware
+ *       not present in the system.
+ *
+ * @note with @e token set to CRYPT_ANY_TOKEN libcryptsetup runs best effort loop
+ *       to unlock device using any available token. It may happen that various token handlers
+ *       return different error codes. At the end loop returns error codes in the following
+ *       order (from the most significant to the least) any negative errno except those
+ *       listed below, non negative token id (success), -ENOANO, -EAGAIN, -EPERM, -ENOENT.
+ */
+int crypt_activate_by_token_pin(struct crypt_device *cd,
+	const char *name,
+	const char *type,
+	int token,
+	const char *pin,
+	size_t pin_size,
 	void *usrptr,
 	uint32_t flags);
 /** @} */
@@ -2197,15 +2450,16 @@ int crypt_activate_by_token(struct crypt_device *cd,
  */
 
 /** Initialize reencryption metadata but do not run reencryption yet. (in) */
-#define CRYPT_REENCRYPT_INITIALIZE_ONLY    (1 << 0)
-/** Move the first segment, used only with data shift. (in/out) */
-#define CRYPT_REENCRYPT_MOVE_FIRST_SEGMENT (1 << 1)
+#define CRYPT_REENCRYPT_INITIALIZE_ONLY    (UINT32_C(1) << 0)
+/** Move the first segment, used only with datashift resilience mode
+ *  and subvariants. (in/out) */
+#define CRYPT_REENCRYPT_MOVE_FIRST_SEGMENT (UINT32_C(1) << 1)
 /** Resume already initialized reencryption only. (in) */
-#define CRYPT_REENCRYPT_RESUME_ONLY        (1 << 2)
+#define CRYPT_REENCRYPT_RESUME_ONLY        (UINT32_C(1) << 2)
 /** Run reencryption recovery only. (in) */
-#define CRYPT_REENCRYPT_RECOVERY           (1 << 3)
+#define CRYPT_REENCRYPT_RECOVERY           (UINT32_C(1) << 3)
 /** Reencryption requires metadata protection. (in/out) */
-#define CRYPT_REENCRYPT_REPAIR_NEEDED      (1 << 4)
+#define CRYPT_REENCRYPT_REPAIR_NEEDED      (UINT32_C(1) << 4)
 
 /**
  * Reencryption direction
@@ -2230,10 +2484,15 @@ typedef enum {
 struct crypt_params_reencrypt {
 	crypt_reencrypt_mode_info mode;           /**< Reencryption mode, immutable after first init. */
 	crypt_reencrypt_direction_info direction; /**< Reencryption direction, immutable after first init. */
-	const char *resilience;                   /**< Resilience mode: "none", "checksum", "journal" or "shift" (only "shift" is immutable after init) */
+	const char *resilience;                   /**< Resilience mode: "none", "checksum", "journal", "datashift",
+						       "datashift-checksum" or "datashift-journal".
+						       "datashift" mode is immutable, "datashift-" subvariant can be only
+						       changed to other "datashift-" subvariant */
 	const char *hash;                         /**< Used hash for "checksum" resilience type, ignored otherwise. */
-	uint64_t data_shift;                      /**< Used in "shift" mode, must be non-zero, immutable after first init. */
-	uint64_t max_hotzone_size;                /**< Exact hotzone size for "none" mode. Maximum hotzone size for "checksum" and "journal" modes. */
+	uint64_t data_shift;                      /**< Used in "datashift" mode (and subvariants), must be non-zero,
+						       immutable after first init. */
+	uint64_t max_hotzone_size;                /**< Maximum hotzone size (may be lowered by library). For "datashift-" subvariants
+						       it is used to set size of moved segment (decryption only). */
 	uint64_t device_size;			  /**< Reencrypt only initial part of the data device. */
 	const struct crypt_params_luks2 *luks2;   /**< LUKS2 parameters for the final reencryption volume.*/
 	uint32_t flags;                           /**< Reencryption flags. */
@@ -2298,16 +2557,33 @@ int crypt_reencrypt_init_by_keyring(struct crypt_device *cd,
 	const struct crypt_params_reencrypt *params);
 
 /**
- * Run data reencryption.
+ * Legacy data reencryption function.
  *
  * @param cd crypt device handle
  * @param progress is a callback function reporting device \b size,
  * current \b offset of reencryption and provided \b usrptr identification
  *
  * @return @e 0 on success or negative errno value otherwise.
+ *
+ * @deprecated Use @link crypt_reencrypt_run @endlink instead.
  */
 int crypt_reencrypt(struct crypt_device *cd,
-		    int (*progress)(uint64_t size, uint64_t offset, void *usrptr));
+		    int (*progress)(uint64_t size, uint64_t offset, void *usrptr))
+__attribute__((deprecated));
+
+/**
+ * Run data reencryption.
+ *
+ * @param cd crypt device handle
+ * @param progress is a callback function reporting device \b size,
+ * current \b offset of reencryption and provided \b usrptr identification
+ * @param usrptr progress specific data
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ */
+int crypt_reencrypt_run(struct crypt_device *cd,
+		    int (*progress)(uint64_t size, uint64_t offset, void *usrptr),
+		    void *usrptr);
 
 /**
  * Reencryption status info

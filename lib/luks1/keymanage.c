@@ -2,8 +2,8 @@
  * LUKS - Linux Unified Key Setup
  *
  * Copyright (C) 2004-2006 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2021 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2013-2021 Milan Broz
+ * Copyright (C) 2009-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2013-2022 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -22,7 +22,6 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <netinet/in.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -64,6 +63,27 @@ static void LUKS_sort_keyslots(const struct luks_phdr *hdr, int *array)
 			j--;
 		}
 	}
+}
+
+static int _is_not_lower(char *str, unsigned max_len)
+{
+	for(; *str && max_len; str++, max_len--)
+		if (isupper(*str))
+			return 1;
+	return 0;
+}
+
+static int _to_lower(char *str, unsigned max_len)
+{
+	int r = 0;
+
+	for(; *str && max_len; str++, max_len--)
+		if (isupper(*str)) {
+			*str = tolower(*str);
+			r = 1;
+		}
+
+	return r;
 }
 
 size_t LUKS_device_sectors(const struct luks_phdr *hdr)
@@ -379,11 +399,35 @@ static int _keyslot_repair(struct luks_phdr *phdr, struct crypt_device *ctx)
 	/*
 	 * cryptsetup 1.0 did not align keyslots to 4k, cannot repair this one
 	 * Also we cannot trust possibly broken keyslots metadata here through LUKS_keyslots_offset().
-	 * Expect first keyslot is aligned, if not, then manual repair is neccessary.
+	 * Expect first keyslot is aligned, if not, then manual repair is necessary.
 	 */
 	if (phdr->keyblock[0].keyMaterialOffset < (LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE)) {
 		log_err(ctx, _("Non standard keyslots alignment, manual repair required."));
 		return -EINVAL;
+	}
+
+	/*
+	 * ECB mode does not use IV but legacy dmcrypt silently allows it.
+	 * Today device cannot be activated anyway, so we need to fix it here.
+	 */
+	if (!strncmp(phdr->cipherMode, "ecb-", 4)) {
+		log_err(ctx, _("Cipher mode repaired (%s -> %s)."), phdr->cipherMode, "ecb");
+		memset(phdr->cipherMode, 0, LUKS_CIPHERMODE_L);
+		strcpy(phdr->cipherMode, "ecb");
+		need_write = 1;
+	}
+
+	/*
+	 * Old cryptsetup expects "sha1", gcrypt allows case insensitive names,
+	 * so always convert hash to lower case in header
+	 */
+	if (_to_lower(phdr->hashSpec, LUKS_HASHSPEC_L)) {
+		log_err(ctx, _("Cipher hash repaired to lowercase (%s)."), phdr->hashSpec);
+		if (crypt_hmac_size(phdr->hashSpec) < LUKS_DIGESTSIZE) {
+			log_err(ctx, _("Requested LUKS hash %s is not supported."), phdr->hashSpec);
+			return -EINVAL;
+		}
+		need_write = 1;
 	}
 
 	r = LUKS_check_cipher(ctx, phdr->keyBytes, phdr->cipherName, phdr->cipherMode);
@@ -473,12 +517,13 @@ static int _check_and_convert_hdr(const char *device,
 	unsigned int i;
 	char luksMagic[] = LUKS_MAGIC;
 
-	if(memcmp(hdr->magic, luksMagic, LUKS_MAGIC_L)) { /* Check magic */
+	hdr->version = be16_to_cpu(hdr->version);
+	if (memcmp(hdr->magic, luksMagic, LUKS_MAGIC_L)) { /* Check magic */
 		log_dbg(ctx, "LUKS header not detected.");
 		if (require_luks_device)
 			log_err(ctx, _("Device %s is not a valid LUKS device."), device);
 		return -EINVAL;
-	} else if((hdr->version = ntohs(hdr->version)) != 1) {	/* Convert every uint16/32_t item from network byte order */
+	} else if (hdr->version != 1) {
 		log_err(ctx, _("Unsupported LUKS version %d."), hdr->version);
 		return -EINVAL;
 	}
@@ -486,19 +531,19 @@ static int _check_and_convert_hdr(const char *device,
 	hdr->hashSpec[LUKS_HASHSPEC_L - 1] = '\0';
 	if (crypt_hmac_size(hdr->hashSpec) < LUKS_DIGESTSIZE) {
 		log_err(ctx, _("Requested LUKS hash %s is not supported."), hdr->hashSpec);
-		return -EINVAL;
+		r = -EINVAL;
 	}
 
 	/* Header detected */
-	hdr->payloadOffset      = ntohl(hdr->payloadOffset);
-	hdr->keyBytes           = ntohl(hdr->keyBytes);
-	hdr->mkDigestIterations = ntohl(hdr->mkDigestIterations);
+	hdr->payloadOffset      = be32_to_cpu(hdr->payloadOffset);
+	hdr->keyBytes           = be32_to_cpu(hdr->keyBytes);
+	hdr->mkDigestIterations = be32_to_cpu(hdr->mkDigestIterations);
 
-	for(i = 0; i < LUKS_NUMKEYS; ++i) {
-		hdr->keyblock[i].active             = ntohl(hdr->keyblock[i].active);
-		hdr->keyblock[i].passwordIterations = ntohl(hdr->keyblock[i].passwordIterations);
-		hdr->keyblock[i].keyMaterialOffset  = ntohl(hdr->keyblock[i].keyMaterialOffset);
-		hdr->keyblock[i].stripes            = ntohl(hdr->keyblock[i].stripes);
+	for (i = 0; i < LUKS_NUMKEYS; ++i) {
+		hdr->keyblock[i].active             = be32_to_cpu(hdr->keyblock[i].active);
+		hdr->keyblock[i].passwordIterations = be32_to_cpu(hdr->keyblock[i].passwordIterations);
+		hdr->keyblock[i].keyMaterialOffset  = be32_to_cpu(hdr->keyblock[i].keyMaterialOffset);
+		hdr->keyblock[i].stripes            = be32_to_cpu(hdr->keyblock[i].stripes);
 	}
 
 	if (LUKS_check_keyslots(ctx, hdr))
@@ -510,6 +555,16 @@ static int _check_and_convert_hdr(const char *device,
 	hdr->uuid[UUID_STRING_L - 1] = '\0';
 
 	if (repair) {
+		if (!strncmp(hdr->cipherMode, "ecb-", 4)) {
+			log_err(ctx, _("LUKS cipher mode %s is invalid."), hdr->cipherMode);
+			r = -EINVAL;
+		}
+
+		if (_is_not_lower(hdr->hashSpec, LUKS_HASHSPEC_L)) {
+			log_err(ctx, _("LUKS hash %s is invalid."), hdr->hashSpec);
+			r = -EINVAL;
+		}
+
 		if (r == -EINVAL)
 			r = _keyslot_repair(hdr, ctx);
 		else
@@ -517,27 +572,6 @@ static int _check_and_convert_hdr(const char *device,
 	}
 
 	return r;
-}
-
-static void _to_lower(char *str, unsigned max_len)
-{
-	for(; *str && max_len; str++, max_len--)
-		if (isupper(*str))
-			*str = tolower(*str);
-}
-
-static void LUKS_fix_header_compatible(struct luks_phdr *header)
-{
-	/* Old cryptsetup expects "sha1", gcrypt allows case insensitive names,
-	 * so always convert hash to lower case in header */
-	_to_lower(header->hashSpec, LUKS_HASHSPEC_L);
-
-	/* ECB mode does not use IV but dmcrypt silently allows it.
-	 * Drop any IV here if ECB is used (that is not secure anyway).*/
-	if (!strncmp(header->cipherMode, "ecb-", 4)) {
-		memset(header->cipherMode, 0, LUKS_CIPHERMODE_L);
-		strcpy(header->cipherMode, "ecb");
-	}
 }
 
 int LUKS_read_phdr_backup(const char *backup_file,
@@ -559,11 +593,9 @@ int LUKS_read_phdr_backup(const char *backup_file,
 
 	if (read_buffer(devfd, hdr, hdr_size) < hdr_size)
 		r = -EIO;
-	else {
-		LUKS_fix_header_compatible(hdr);
+	else
 		r = _check_and_convert_hdr(backup_file, hdr,
 					   require_luks_device, 0, ctx);
-	}
 
 	close(devfd);
 	return r;
@@ -650,15 +682,15 @@ int LUKS_write_phdr(struct luks_phdr *hdr,
 	memset(&convHdr._padding, 0, sizeof(convHdr._padding));
 
 	/* Convert every uint16/32_t item to network byte order */
-	convHdr.version            = htons(hdr->version);
-	convHdr.payloadOffset      = htonl(hdr->payloadOffset);
-	convHdr.keyBytes           = htonl(hdr->keyBytes);
-	convHdr.mkDigestIterations = htonl(hdr->mkDigestIterations);
+	convHdr.version            = cpu_to_be16(hdr->version);
+	convHdr.payloadOffset      = cpu_to_be32(hdr->payloadOffset);
+	convHdr.keyBytes           = cpu_to_be32(hdr->keyBytes);
+	convHdr.mkDigestIterations = cpu_to_be32(hdr->mkDigestIterations);
 	for(i = 0; i < LUKS_NUMKEYS; ++i) {
-		convHdr.keyblock[i].active             = htonl(hdr->keyblock[i].active);
-		convHdr.keyblock[i].passwordIterations = htonl(hdr->keyblock[i].passwordIterations);
-		convHdr.keyblock[i].keyMaterialOffset  = htonl(hdr->keyblock[i].keyMaterialOffset);
-		convHdr.keyblock[i].stripes            = htonl(hdr->keyblock[i].stripes);
+		convHdr.keyblock[i].active             = cpu_to_be32(hdr->keyblock[i].active);
+		convHdr.keyblock[i].passwordIterations = cpu_to_be32(hdr->keyblock[i].passwordIterations);
+		convHdr.keyblock[i].keyMaterialOffset  = cpu_to_be32(hdr->keyblock[i].keyMaterialOffset);
+		convHdr.keyblock[i].stripes            = cpu_to_be32(hdr->keyblock[i].stripes);
 	}
 
 	r = write_lseek_blockwise(devfd, device_block_size(ctx, device), device_alignment(device),
@@ -771,10 +803,9 @@ int LUKS_generate_phdr(struct luks_phdr *header,
 	strncpy(header->cipherName,cipherName,LUKS_CIPHERNAME_L-1);
 	strncpy(header->cipherMode,cipherMode,LUKS_CIPHERMODE_L-1);
 	strncpy(header->hashSpec,hashSpec,LUKS_HASHSPEC_L-1);
+	_to_lower(header->hashSpec, LUKS_HASHSPEC_L);
 
 	header->keyBytes=vk->keylength;
-
-	LUKS_fix_header_compatible(header);
 
 	log_dbg(ctx, "Generating LUKS header version %d using hash %s, %s, %s, MK %d bytes",
 		header->version, header->hashSpec ,header->cipherName, header->cipherMode,
@@ -786,7 +817,7 @@ int LUKS_generate_phdr(struct luks_phdr *header,
 		return r;
 	}
 
-	/* Compute master key digest */
+	/* Compute volume key digest */
 	pbkdf = crypt_get_pbkdf(ctx);
 	r = crypt_benchmark_pbkdf_internal(ctx, pbkdf, vk->keylength);
 	if (r < 0)
@@ -800,7 +831,7 @@ int LUKS_generate_phdr(struct luks_phdr *header,
 
 	if (PBKDF2_temp > (double)UINT32_MAX)
 		return -EINVAL;
-	header->mkDigestIterations = at_least((uint32_t)PBKDF2_temp, LUKS_MKD_ITERATIONS_MIN);
+	header->mkDigestIterations = AT_LEAST((uint32_t)PBKDF2_temp, LUKS_MKD_ITERATIONS_MIN);
 	assert(header->mkDigestIterations);
 
 	r = crypt_pbkdf(CRYPT_KDF_PBKDF2, header->hashSpec, vk->key,vk->keylength,
@@ -874,7 +905,7 @@ int LUKS_set_key(unsigned int keyIndex,
 	 * Final iteration count is at least LUKS_SLOT_ITERATIONS_MIN
 	 */
 	hdr->keyblock[keyIndex].passwordIterations =
-		at_least(pbkdf->iterations, LUKS_SLOT_ITERATIONS_MIN);
+		AT_LEAST(pbkdf->iterations, LUKS_SLOT_ITERATIONS_MIN);
 	log_dbg(ctx, "Key slot %d use %" PRIu32 " password iterations.", keyIndex,
 		hdr->keyblock[keyIndex].passwordIterations);
 
@@ -895,7 +926,7 @@ int LUKS_set_key(unsigned int keyIndex,
 		goto out;
 
 	/*
-	 * AF splitting, the masterkey stored in vk->key is split to AfKey
+	 * AF splitting, the volume key stored in vk->key is split to AfKey
 	 */
 	assert(vk->keylength == hdr->keyBytes);
 	AFEKSize = AF_split_sectors(vk->keylength, hdr->keyblock[keyIndex].stripes) * SECTOR_SIZE;
@@ -951,7 +982,7 @@ int LUKS_verify_volume_key(const struct luks_phdr *hdr,
 			hdr->mkDigestIterations, 0, 0) < 0)
 		return -EINVAL;
 
-	if (memcmp(checkHashBuf, hdr->mkDigest, LUKS_DIGESTSIZE))
+	if (crypt_backend_memeq(checkHashBuf, hdr->mkDigest, LUKS_DIGESTSIZE))
 		return -EPERM;
 
 	return 0;
@@ -1013,7 +1044,7 @@ static int LUKS_open_key(unsigned int keyIndex,
 	if (r < 0)
 		goto out;
 
-	r = AF_merge(ctx, AfKey, (*vk)->key, (*vk)->keylength, hdr->keyblock[keyIndex].stripes, hdr->hashSpec);
+	r = AF_merge(AfKey, (*vk)->key, (*vk)->keylength, hdr->keyblock[keyIndex].stripes, hdr->hashSpec);
 	if (r < 0)
 		goto out;
 
