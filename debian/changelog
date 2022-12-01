@@ -1,4 +1,4 @@
-cryptsetup (2:2.5.0-6pexip1) pexip; urgency=medium
+cryptsetup (2:2.5.0-6pexip1) pexip-bullseye-openssl3; urgency=medium
 
   * New upstream release
 
