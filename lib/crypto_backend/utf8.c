@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Lennart Poettering
  *
  * cryptsetup related changes
- * Copyright (C) 2021-2022 Vojtech Trefny
+ * Copyright (C) 2021-2023 Vojtech Trefny
 
  * Parts of the original systemd implementation are based on the GLIB utf8
  * validation functions.
@@ -28,7 +28,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#include <assert.h>
 #include <errno.h>
 #include <endian.h>
 

@@ -1,8 +1,8 @@
 /*
  * OPENSSL crypto backend implementation
  *
- * Copyright (C) 2010-2022 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2022 Milan Broz
+ * Copyright (C) 2010-2023 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2023 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -30,6 +30,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -231,7 +232,11 @@ void crypt_backend_destroy(void)
 
 uint32_t crypt_backend_flags(void)
 {
+#if OPENSSL_VERSION_MAJOR >= 3
 	return 0;
+#else
+	return CRYPT_BACKEND_PBKDF2_INT;
+#endif
 }
 
 const char *crypt_backend_version(void)
@@ -574,6 +579,10 @@ static int openssl_pbkdf2(const char *password, size_t password_length,
 	if (!hash_id)
 		return -EINVAL;
 
+	/* OpenSSL2 has iteration as signed int, avoid overflow */
+	if (iterations > INT_MAX)
+		return -EINVAL;
+
 	r = PKCS5_PBKDF2_HMAC(password, (int)password_length, (const unsigned char *)salt,
 		(int)salt_length, iterations, hash_id, (int)key_length, (unsigned char*) key);
 #endif
@@ -812,3 +821,29 @@ int crypt_backend_memeq(const void *m1, const void *m2, size_t n)
 {
 	return CRYPTO_memcmp(m1, m2, n);
 }
+
+#if !ENABLE_FIPS
+bool crypt_fips_mode(void) { return false; }
+#else
+static bool openssl_fips_mode(void)
+{
+#if OPENSSL_VERSION_MAJOR >= 3
+	return EVP_default_properties_is_fips_enabled(NULL);
+#else
+	return FIPS_mode();
+#endif
+}
+
+bool crypt_fips_mode(void)
+{
+	static bool fips_mode = false, fips_checked = false;
+
+	if (fips_checked)
+		return fips_mode;
+
+	fips_mode = openssl_fips_mode();
+	fips_checked = true;
+
+	return fips_mode;
+}
+#endif /* ENABLE FIPS */

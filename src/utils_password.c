@@ -1,8 +1,8 @@
 /*
  * Password quality check wrapper
  *
- * Copyright (C) 2012-2022 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2022 Milan Broz
+ * Copyright (C) 2012-2023 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2023 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -49,10 +49,8 @@ static int tools_check_pwquality(const char *password)
 		log_err(_("Password quality check failed:\n %s"),
 			pwquality_strerror(NULL, 0, r, auxerror));
 		r = -EPERM;
-	} else {
-		log_dbg("New password libpwquality score is %d.", r);
+	} else
 		r = 0;
-	}
 
 	pwquality_free_settings(pwq);
 	return r;
@@ -106,6 +104,7 @@ static int tools_check_password(const char *password)
 
 /* Password reading helpers */
 
+/* coverity[ -taint_source : arg-1 ] */
 static ssize_t read_tty_eol(int fd, char *pass, size_t maxlen)
 {
 	bool eol = false;

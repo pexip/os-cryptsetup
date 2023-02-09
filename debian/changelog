@@ -1,3 +1,52 @@
+cryptsetup (2:2.6.1-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+  * d/README.Debian: Explicitly set cswap1's device type to 'plain'.
+    (Closes: #1025136)
+  * d/control: Update standards version to 4.6.2, no changes needed.
+  * d/clean: Add some gitignore(5)'d files. (Closes: #1026838)
+  * cryptgnupg-sc hook: Look terminfo file in /usr/share/terminfo in adition
+    to /lib/terminfo, see #1028202. (Closes: 1028234)
+  * d/copyright: Bump copyright years.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Fri, 10 Feb 2023 00:50:42 +0100
+
+cryptsetup (2:2.6.0-2) unstable; urgency=low
+
+  * libcryptsetup-dev: Add 'Depends: libargon2-dev, libblkid-dev,
+    libdevmapper-dev, libjson-c-dev, libssl-dev, uuid-dev' to account for
+    libcryptsetup.pc's Requires.private.  Closes: #1025054.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 29 Nov 2022 15:42:25 +0100
+
+cryptsetup (2:2.6.0-1) unstable; urgency=low
+
+  * New upstream release 2.6.0.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 29 Nov 2022 01:20:38 +0100
+
+cryptsetup (2:2.6.0~rc0-1) experimental; urgency=medium
+
+  * New upstream release candidate 2.6.0, introducing support for handling
+    macOS FileVault2 devices (FVAULT2).  The new version of FileVault based on
+    the APFS filesystem used in recent macOS versions is currently not
+    supported: only the (legacy) FileVault2 format based on Core Storage and
+    HFS+ filesystem (introduced in MacOS X 10.7 Lion) is supported.  Moreover
+    header formatting and changes are not supported; cryptsetup never changes
+    the metadata on the device.
+    Closes: #923513.
+  * Update d/copyright for 2:2.6.0~rc0-1.
+  * Ship cryptsetup-fvault2Dump(8) and cryptsetup-fvault2Open(8) to
+    cryptsetup-bin binary package.
+  * Update d/libcryptsetup12.symbols for 2:2.6.0~rc0-1.
+  * Add 'fvault2' flag to crypttab(5) to force detection of Apple's FileVault2
+    volumes.
+  * d/rules: Add new target execute_before_dh_auto_test so blhc ignores
+    compilations of tests/*.c.
+  * d/u/metadata: Set 'Security-Contact' upstream metadata field.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sat, 19 Nov 2022 17:30:40 +0100
+
 cryptsetup (2:2.5.0-6) unstable; urgency=medium
 
   * d/t/cryptroot-*: Mask systemd-firstboot.service.

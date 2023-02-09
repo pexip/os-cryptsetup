@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2022 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2022 Milan Broz
+ * Copyright (C) 2009-2023 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2023 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -435,29 +435,34 @@ int tools_write_mk(const char *file, const char *key, int keysize)
 
 void tools_package_version(const char *name, bool use_pwlibs)
 {
-	log_std("%s %s flags: %s%s\n", name, PACKAGE_VERSION,
+	bool udev = false, blkid = false, keyring = false, fips = false;
+	bool kernel_capi = false, pwquality = false, passwdqc = false;
 #ifdef USE_UDEV
-	"UDEV "
+	udev = true;
 #endif
 #ifdef HAVE_BLKID
-	"BLKID "
+	blkid = true;
 #endif
 #ifdef KERNEL_KEYRING
-	"KEYRING "
+	keyring = true;
 #endif
 #ifdef ENABLE_FIPS
-	"FIPS "
+	fips = true;
 #endif
 #ifdef ENABLE_AF_ALG
-	"KERNEL_CAPI "
+	kernel_capi = true;
 #endif
-	,
 #if defined(ENABLE_PWQUALITY)
-	use_pwlibs ? "PWQUALITY " : ""
+	pwquality = true;
 #elif defined(ENABLE_PASSWDQC)
-	use_pwlibs ? "PASSWDQC " : ""
-#else
-	""
+	passwdqc = true;
 #endif
-	);
+	log_std("%s %s flags: %s%s%s%s%s%s%s\n", name, PACKAGE_VERSION,
+		udev ?	"UDEV " : "",
+		blkid ? "BLKID " : "",
+		keyring ? "KEYRING " : "",
+		fips ? "FIPS " : "",
+		kernel_capi ? "KERNEL_CAPI " : "",
+		pwquality && use_pwlibs ? "PWQUALITY " : "",
+		passwdqc && use_pwlibs ? "PASSWDQC " : "");
 }
