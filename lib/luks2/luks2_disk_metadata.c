@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2
  *
- * Copyright (C) 2015-2022 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2022 Milan Broz
+ * Copyright (C) 2015-2023 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2023 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -18,8 +18,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-
-#include <assert.h>
 
 #include "luks2_internal.h"
 

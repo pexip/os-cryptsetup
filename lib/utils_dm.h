@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2022 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2022 Milan Broz
+ * Copyright (C) 2009-2023 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2023 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -75,6 +75,7 @@ static inline uint32_t act2dmflags(uint32_t act_flags)
 #define DM_CRYPT_NO_WORKQUEUE_SUPPORTED (1 << 25) /* dm-crypt suppot for bypassing workqueues  */
 #define DM_INTEGRITY_FIX_HMAC_SUPPORTED (1 << 26) /* hmac covers also superblock */
 #define DM_INTEGRITY_RESET_RECALC_SUPPORTED (1 << 27) /* dm-integrity automatic recalculation supported */
+#define DM_VERITY_TASKLETS_SUPPORTED (1 << 28) /* dm-verity tasklets supported */
 
 typedef enum { DM_CRYPT = 0, DM_VERITY, DM_INTEGRITY, DM_LINEAR, DM_ERROR, DM_ZERO, DM_UNKNOWN } dm_target_type;
 enum tdirection { TARGET_EMPTY = 0, TARGET_SET, TARGET_QUERY };

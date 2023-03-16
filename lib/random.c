@@ -1,7 +1,7 @@
 /*
  * cryptsetup kernel RNG access functions
  *
- * Copyright (C) 2010-2022 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2023 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,7 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <assert.h>
 #include <sys/select.h>
 
 #include "libcryptsetup.h"
@@ -171,6 +170,7 @@ err:
 	return -ENOSYS;
 }
 
+/* coverity[ -taint_source : arg-1 ] */
 int crypt_random_get(struct crypt_device *ctx, char *buf, size_t len, int quality)
 {
 	int status, rng_type;

@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2
  *
- * Copyright (C) 2015-2022 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2022 Milan Broz
+ * Copyright (C) 2015-2023 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2023 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -188,6 +188,8 @@ int keyring_open(struct crypt_device *cd,
 void keyring_dump(struct crypt_device *cd, const char *json);
 
 int keyring_validate(struct crypt_device *cd, const char *json);
+
+void keyring_buffer_free(void *buffer, size_t buffer_size);
 
 struct crypt_token_handler_v2 {
 	const char *name;
