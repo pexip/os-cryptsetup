@@ -8,7 +8,7 @@
 
 == Name
 
-cryptsetup-open, cryptsetup-create, cryptsetup-plainOpen, cryptsetup-luksOpen, cryptsetup-loopaesOpen, cryptsetup-tcryptOpen, cryptsetup-bitlkOpen - open an encrypted device and create a mapping with a specified name
+cryptsetup-open, cryptsetup-create, cryptsetup-plainOpen, cryptsetup-luksOpen, cryptsetup-loopaesOpen, cryptsetup-tcryptOpen, cryptsetup-bitlkOpen, cryptsetup-fvault2Open - open an encrypted device and create a mapping with a specified name
 
 == SYNOPSIS
 
@@ -59,9 +59,15 @@ luksOpen <device> <name> (*old syntax*)
 Opens the LUKS device <device> and sets up a mapping <name> after
 successful verification of the supplied passphrase.
 
-First, the passphrase is searched in LUKS tokens. If it's not found in
-any token and also the passphrase is not supplied via --key-file, the
-command prompts for it interactively.
+First, the passphrase is searched in LUKS2 tokens unprotected by PIN.
+If such token does not exist (or fails to unlock keyslot) and
+also the passphrase is not supplied via --key-file, the command
+prompts for passphrase interactively.
+
+If there is valid LUKS2 token but it requires PIN to unlock assigned keyslot,
+it is not used unless one of following options is added: --token-only,
+--token-type where type matches desired PIN protected token or --token-id with id
+matching PIN protected token.
 
 *<options>* can be [--key-file, --keyfile-offset, --keyfile-size,
 --readonly, --test-passphrase, --allow-discards, --header, --key-slot,
@@ -138,6 +144,17 @@ so this space can be discarded).
 bitlkOpen <device> <name> (*old syntax*)
 
 Opens the BITLK (a BitLocker compatible) <device> and sets up a mapping
+<name>.
+
+*<options>* can be [--key-file, --keyfile-offset, --keyfile-size, --key-size,
+--readonly, --test-passphrase, --allow-discards --volume-key-file, --tries,
+--timeout, --verify-passphrase].
+
+=== FileVault2
+*open --type fvault2 <device> <name>* +
+fvault2Open <device> <name> (*old syntax*)
+
+Opens the FVAULT2 (a FileVault2 compatible) <device> and sets up a mapping
 <name>.
 
 *<options>* can be [--key-file, --keyfile-offset, --keyfile-size, --key-size,

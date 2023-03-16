@@ -1,8 +1,8 @@
 /*
  * Command line arguments name list
  *
- * Copyright (C) 2020-2022 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2020-2022 Ondrej Kozina
+ * Copyright (C) 2020-2023 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2020-2023 Ondrej Kozina
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -107,8 +107,11 @@
 #define OPT_MASTER_KEY_FILE		"master-key-file"
 #define OPT_VOLUME_KEY_FILE		"volume-key-file"
 #define OPT_NEW				"new"
+#define OPT_NEW_KEY_SLOT		"new-key-slot"
+#define OPT_NEW_KEYFILE			"new-keyfile"
 #define OPT_NEW_KEYFILE_OFFSET		"new-keyfile-offset"
 #define OPT_NEW_KEYFILE_SIZE		"new-keyfile-size"
+#define OPT_NEW_TOKEN_ID		"new-token-id"
 #define OPT_OFFSET			"offset"
 #define OPT_PANIC_ON_CORRUPTION		"panic-on-corruption"
 #define OPT_PBKDF			"pbkdf"
@@ -158,6 +161,7 @@
 #define OPT_USE_FSYNC			"use-fsync"
 #define OPT_USE_RANDOM			"use-random"
 #define OPT_USE_URANDOM			"use-urandom"
+#define OPT_USE_TASKLETS		"use-tasklets"
 #define OPT_UUID			"uuid"
 #define OPT_VERACRYPT			"veracrypt"
 #define OPT_VERACRYPT_PIM		"veracrypt-pim"
