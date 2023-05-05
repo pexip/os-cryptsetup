@@ -1,3 +1,59 @@
+cryptsetup (2:2.6.1-4~deb12u1pexip1) pexip; urgency=medium
+
+  * New upstream release
+
+ -- Steve McIntyre <steve.mcintyre@pexip.com>  Fri, 05 May 2023 15:44:256 +0100
+
+cryptsetup (2:2.6.1-4~deb12u1) bookworm; urgency=medium
+
+  * Rebuild for Bookworm.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Fri, 21 Apr 2023 00:54:29 +0200
+
+cryptsetup (2:2.6.1-4) unstable; urgency=medium
+
+  * Backport upstream MR !498, see #1028250:
+    + 7893c33d: Check for physical memory available also in PBKDF benchmark.
+    + 6721d3a8: Use only half of detected free memory on systems without swap.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Thu, 20 Apr 2023 23:46:08 +0200
+
+cryptsetup (2:2.6.1-3~deb12u1) bookworm; urgency=medium
+
+  * Rebuild for Bookworm.
+  * d/gbp.conf: Set 'debian-branch = debian/bookworm'.
+  * #1032221 can't be fixed via unstable since libcryptsetup12-udeb 2:2.6.1-3
+    has "Depends: libargon2-1-udeb (>= 0~20190702)" which won't transition to
+    testing, so instead the release team asked for a t-p-u upload.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sun, 26 Mar 2023 19:18:59 +0200
+
+cryptsetup (2:2.6.1-3) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * initramfs hook: Fix copy_libgcc_argon2() on non merged-/usr systems.
+    (Closes: #1032518)
+  * Backport upstream MR !490, see #1028250:
+    + 27f8e5c0: Try to avoid OOM killer on low-memory systems without swap
+    + 899bad8c: Print warning when keyslot requires more memory than available
+  * d/t/initramfs-hook: Pass `-xdev` to `find "$INITRD_DIR"` in order to solve
+    a race condition in that autopkgtest.
+
+  [ Remus-Gabriel Chelu ]
+  * Add Romanian debconf templates translation. (Closes: #1031497)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Mon, 13 Mar 2023 23:43:50 +0100
+
+cryptsetup (2:2.6.1-2) unstable; urgency=medium
+
+  * initramfs hook: Explicitly call copy_libgcc().  The recent libargon2-1
+    upgrade is built with glibc ≥2.34 hence no longer links libpthread.  This
+    in turns means that initramfs-tool's copy_exec() is no longer able to
+    detect pthread_*() need and thus doesn't copy libgcc_s.so anymore.  So we
+    need to do it manually instead.  Closes: #1032221
+
+ -- Guilhem Moulin <guilhem@debian.org>  Thu, 02 Mar 2023 05:01:53 +0100
+
 cryptsetup (2:2.6.1-1pexip1) pexip; urgency=medium
 
   * New upstream release
