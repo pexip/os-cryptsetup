@@ -2,7 +2,7 @@ cryptsetup (2:2.6.1-4~deb12u1pexip1) pexip; urgency=medium
 
   * New upstream release
 
- -- Steve McIntyre <steve.mcintyre@pexip.com>  Fri, 05 May 2023 15:44:256 +0100
+ -- Steve McIntyre <steve.mcintyre@pexip.com>  Fri, 05 May 2023 15:44:25 +0100
 
 cryptsetup (2:2.6.1-4~deb12u1) bookworm; urgency=medium
 
