@@ -1,6 +1,7 @@
 cryptsetup (2:2.6.1-4~deb12u1pexip2) pexip-bookworm; urgency=medium
 
   * Initial bookworm build
+  * Patch out cryptsetup-ssh as we do not need it and it requires libssh.
 
  -- Mark Hymers <mark.hymers@pexip.com>  Thu, 16 Nov 2023 09:57:01 +0000
 

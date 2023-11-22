@@ -29,7 +29,8 @@ override_dh_auto_configure:
 		--with-tmpfilesdir=/usr/lib/tmpfiles.d \
 		--enable-libargon2 \
 		--enable-shared \
-		--enable-cryptsetup-reencrypt
+		--enable-cryptsetup-reencrypt \
+		--disable-ssh-token
 
 execute_after_dh_auto_build:
 	# build askpass and passdev keyscripts
