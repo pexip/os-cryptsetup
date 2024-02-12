@@ -1,3 +1,9 @@
+cryptsetup (2:2.6.1-4~deb12u2+pexip24u1) pexip; urgency=medium
+
+  * New upstream release.
+
+ -- Mark Hymers <mark.hymers@pexip.com>  Mon, 12 Feb 2024 09:16:57 +0000
+
 cryptsetup (2:2.6.1-4~deb12u2) bookworm; urgency=medium
 
   [ Michael Biebl ]
