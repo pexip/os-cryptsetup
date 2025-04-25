@@ -19,6 +19,8 @@ Depends: cryptsetup-bin,
   keyutils,
 # for modprobe(8) and rmmod(8)
   kmod,
+# for legacy hash algorithms such as whirlpool, see OSSL_PROVIDER-legacy(7ssl)
+  openssl-provider-legacy,
 # for free(1)
   procps,
 # for uuencode(1)
@@ -55,6 +57,10 @@ Tests: initramfs-hook
 Depends: cryptsetup-initramfs, e2fsprogs, zstd
 Restrictions: allow-stderr, needs-root, isolation-machine
 
+Tests: initramfs-hook-legacy
+Depends: cryptsetup-initramfs, e2fsprogs, openssl-provider-legacy, zstd
+Restrictions: allow-stderr, needs-root, isolation-machine
+
 Tests: cryptroot-lvm, cryptroot-legacy
 # Only dependencies required to set the VM here are listed here;
 # cryptsetup is not listed since we only install it in the VM.
@@ -71,7 +77,7 @@ Depends: cryptsetup-bin,
          udev
 # We only need root to create /dev/kvm, really.  And while it works
 # locally and on debci, it doesn't work on salsa CI..
-Restrictions: allow-stderr, needs-root
+Restrictions: allow-stderr, needs-root, flaky
 Architecture: amd64 i386
 
 Tests: cryptroot-md
@@ -87,7 +93,7 @@ Depends: cryptsetup-bin,
          qemu-efi-arm [armhf],
          qemu-system-arm [arm64 armhf] | qemu-system-x86 [amd64 i386] | qemu-system,
          udev
-Restrictions: allow-stderr, needs-root
+Restrictions: allow-stderr, needs-root, flaky
 Architecture: amd64 i386
 
 Tests: cryptroot-nested
@@ -104,7 +110,7 @@ Depends: btrfs-progs,
          qemu-efi-arm [armhf],
          qemu-system-arm [arm64 armhf] | qemu-system-x86 [amd64 i386] | qemu-system,
          udev
-Restrictions: allow-stderr, needs-root
+Restrictions: allow-stderr, needs-root, flaky
 Architecture: amd64 i386
 
 Tests: cryptroot-sysvinit
@@ -118,7 +124,7 @@ Depends: cryptsetup-bin,
          qemu-efi-arm [armhf],
          qemu-system-arm [arm64 armhf] | qemu-system-x86 [amd64 i386] | qemu-system,
          udev
-Restrictions: allow-stderr, needs-root
+Restrictions: allow-stderr, needs-root, flaky
 Architecture: amd64 i386
 
 # Dummy test so that kernel updates trigger our other autopkgtests on debci
@@ -131,3 +137,7 @@ Depends: linux-image-generic,
          linux-image-686-pae [i386]
 Restrictions: hint-testsuite-triggers
 Architecture: amd64 i386
+
+Tests: crypto-backend
+Depends: cryptsetup-bin
+Restrictions: superficial

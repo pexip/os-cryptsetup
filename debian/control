@@ -16,7 +16,6 @@ Build-Depends: asciidoctor <!nodoc>,
                docbook-xsl <!nodoc>,
                gettext,
                jq <!nocheck>,
-               libargon2-dev,
                libblkid-dev,
                libdevmapper-dev,
                libjson-c-dev,
@@ -24,15 +23,16 @@ Build-Depends: asciidoctor <!nodoc>,
                libselinux1-dev,
                libsepol-dev,
 #               libssh-dev,
-               libssl-dev,
+               libssl-dev (>> 3.2~),
                libtool,
-               pkg-config,
+               openssl-provider-legacy <!nocheck>,
+               pkgconf,
                po-debconf,
                procps <!nocheck>,
                uuid-dev,
                xsltproc <!nodoc>,
                xxd <!nocheck>
-Standards-Version: 4.6.2
+Standards-Version: 4.7.0
 Homepage: https://gitlab.com/cryptsetup/cryptsetup
 Vcs-Browser: https://salsa.debian.org/cryptsetup-team/cryptsetup
 Vcs-Git: https://salsa.debian.org/cryptsetup-team/cryptsetup.git -b debian/latest
@@ -41,13 +41,12 @@ XS-Pexip-Upstream: http://deb.debian.org/debian/ trixie
 Package: cryptsetup
 Architecture: linux-any
 Multi-Arch: foreign
-Depends: cryptsetup-bin (>= 2:1.6.0),
+Depends: cryptsetup-bin (>= 2:2.7.2-1),
          dmsetup,
          ${misc:Depends},
          ${shlibs:Depends}
+Conflicts: cryptsetup-nuke-password (<< 5~)
 Suggests: cryptsetup-initramfs, dosfstools, keyutils, liblocale-gettext-perl
-Replaces: cryptsetup-run (<< 2:2.1.0-6)
-Breaks: cryptsetup-run (<< 2:2.1.0-6)
 Description: disk encryption support - startup scripts
  Cryptsetup provides an interface for configuring encryption on block
  devices (such as /home or swap partitions), using the Linux kernel
@@ -101,7 +100,7 @@ Depends: busybox | busybox-static,
          initramfs-tools (>= 0.137) | linux-initramfs-tool,
          ${misc:Depends}
 Recommends: console-setup, kbd
-Breaks: cryptsetup (<< 2:2.0.3-1)
+Breaks: cryptsetup (<< 2:2.0.3-1), libcryptsetup12 (<< 2:2.7.2-1)
 Replaces: cryptsetup (<< 2:2.0.3-1)
 Conflicts: lvm2 (<< 2.03.15-1)
 Description: disk encryption support - initramfs integration
@@ -134,16 +133,6 @@ Description: disk encryption support - suspend mode integration
  and requires systemd.  Moreover, this is an early implementation and may not
  be as mature as the other cryptsetup-* packages yet.
 
-Package: cryptsetup-run
-Section: oldlibs
-Architecture: all
-Multi-Arch: foreign
-Depends: cryptsetup (>= 2:2.1.0-6), ${misc:Depends}
-Description: transitional dummy package for cryptsetup
- This is a transitional dummy package to get upgrading systems to install the
- cryptsetup package. It can safely be removed once no other package depends on
- it.
-
 Package: libcryptsetup12
 Section: libs
 Architecture: linux-any
@@ -163,8 +152,7 @@ Architecture: linux-any
 Multi-Arch: same
 # XXX [#1025065] ideal we would have "Depends: libcryptsetup12
 # (= ${binary:Version}), ${misc:Depends}, ${pkgconf:Depends}"
-Depends: libargon2-dev,
-         libblkid-dev,
+Depends: libblkid-dev,
          libcryptsetup12 (= ${binary:Version}),
          libdevmapper-dev,
          libjson-c-dev,

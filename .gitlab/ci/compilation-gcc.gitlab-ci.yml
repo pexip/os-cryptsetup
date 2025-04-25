@@ -3,6 +3,7 @@ test-gcc-compilation:
     - .gitlab-shared-gcc
   script:
     - export CFLAGS="-Wall -Werror"
+    - ./autogen.sh
     - ./configure
     - make -j
     - make -j check-programs
@@ -13,6 +14,7 @@ test-gcc-Wall-script:
   script:
     - export CFLAGS="-g -O0"
     - export CC="$CI_PROJECT_DIR/.gitlab/ci/gcc-Wall"
+    - ./autogen.sh
     - ./configure
     - make -j CFLAGS="-g -O0 -Werror"
     - make -j CFLAGS="-g -O0 -Werror" check-programs
@@ -21,7 +23,33 @@ test-gcc-fanalyzer:
   extends:
     - .gitlab-shared-gcc
   script:
-    - export CFLAGS="-Wall -Werror -g -O0 -fanalyzer -fdiagnostics-path-format=separate-events"
-    - ./configure
+    - ./autogen.sh
+    - ./configure CFLAGS="-Wall -Werror -g -O0 -fanalyzer -fdiagnostics-path-format=separate-events" --host=x86_64
+    - make -j
+    - make -j check-programs
+
+test-gcc-fanalyzer-backends:
+  extends:
+    - .gitlab-shared-gcc
+  parallel:
+    matrix:
+      - BACKENDS: [
+          "openssl",
+          "gcrypt",
+          "nss",
+          "kernel",
+          "nettle"
+      ]
+  rules:
+    - if: $CI_PROJECT_PATH != "cryptsetup/cryptsetup"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_BRANCH =~ /v2\..\.x$/
+      changes:
+        - lib/crypto_backend/*
+  script:
+    - DEBIAN_FRONTEND=noninteractive apt-get -yq install libgcrypt20-dev libnss3-dev nettle-dev
+    - ./autogen.sh
+    - echo "Configuring with crypto backend $BACKENDS"
+    - ./configure CFLAGS="-Wall -Werror -g -O0 -fanalyzer -fdiagnostics-path-format=separate-events" --host=x86_64 --with-crypto_backend=$BACKENDS
     - make -j
     - make -j check-programs
