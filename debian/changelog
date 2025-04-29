@@ -1,3 +1,9 @@
+cryptsetup (2:2.7.5-1+pexip25u1) pexip-trixie; urgency=medium
+
+  * Initial trixie build
+
+ -- Mark Hymers <mark.hymers@pexip.com>  Tue, 29 Apr 2025 22:29:38 +0100
+
 cryptsetup (2:2.7.5-1) unstable; urgency=medium
 
   * New bugfix upstream release.
