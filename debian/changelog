@@ -1,3 +1,40 @@
+cryptsetup (2:2.7.5-2) unstable; urgency=medium
+
+  [ Christoph Anton Mitterer ]
+  * d/README.Debian: Minor improvements.
+  * d/README.Debian: Document when during the initramfs devices are mapped.
+  * d/README.Debian: Change initrd to initramfs.
+
+  [ Stephen Gildea ]
+  * initramfs hook: Improve the "Source mismatch" error message when
+    /etc/crypttab gives a source device that does not match the current
+    source.
+
+  [ Guilhem Moulin ]
+  * DEP-8: No longer mark cryptroot-* as flaky and only run them on amd64, see
+    https://bugs.debian.org/1073052#50.
+  * Fix d/t/initramfs-hook and d/t/initramfs-hook-legacy with initramfs-tools
+    ≥0.146. (Closes: #1099818)
+  * cryptsetup-suspend-wrapper, DEP-8: Don't hardcode unmkinitramfs destdir.
+  * d/t/cryptroot-*: Pass --bitmap=internal to mdadm(8).
+  * decrypt_gnupg: Drop obsolete option --secret-keyring. (Closes: #1099760)
+  * initramfs hook: Add vmx_crypto module. (Closes: #1087271)
+  * d/copyright: Replace FSF's old postal address with an URL.
+  * Update Standards-Version to 4.7.2 (no changes necessary).
+  * Boot script: Fix prereq() logic between directories. (Closes: #1081552)
+
+  [ Carles Pina i Estany ]
+  * Added po-debconf Catalan translation. (Closes: #1101115)
+
+  [ Vladimir Petko ]
+  * Fix cryptroot-* autopkgtests on Ubuntu. (Closes: #1031198)
+
+  [ Nicolas Melot ]
+  * initramfs: Preserve crypttab order for entries with the 'initramfs' option.
+    (Closes: #1055024)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sun, 04 May 2025 21:55:13 +0200
+
 cryptsetup (2:2.7.5-1) unstable; urgency=medium
 
   * New bugfix upstream release.
