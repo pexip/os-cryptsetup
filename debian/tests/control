@@ -77,8 +77,8 @@ Depends: cryptsetup-bin,
          udev
 # We only need root to create /dev/kvm, really.  And while it works
 # locally and on debci, it doesn't work on salsa CI..
-Restrictions: allow-stderr, needs-root, flaky
-Architecture: amd64 i386
+Restrictions: allow-stderr, needs-root
+Architecture: amd64
 
 Tests: cryptroot-md
 Depends: cryptsetup-bin,
@@ -93,8 +93,8 @@ Depends: cryptsetup-bin,
          qemu-efi-arm [armhf],
          qemu-system-arm [arm64 armhf] | qemu-system-x86 [amd64 i386] | qemu-system,
          udev
-Restrictions: allow-stderr, needs-root, flaky
-Architecture: amd64 i386
+Restrictions: allow-stderr, needs-root
+Architecture: amd64
 
 Tests: cryptroot-nested
 Depends: btrfs-progs,
@@ -110,8 +110,8 @@ Depends: btrfs-progs,
          qemu-efi-arm [armhf],
          qemu-system-arm [arm64 armhf] | qemu-system-x86 [amd64 i386] | qemu-system,
          udev
-Restrictions: allow-stderr, needs-root, flaky
-Architecture: amd64 i386
+Restrictions: allow-stderr, needs-root
+Architecture: amd64
 
 Tests: cryptroot-sysvinit
 Depends: cryptsetup-bin,
@@ -124,8 +124,8 @@ Depends: cryptsetup-bin,
          qemu-efi-arm [armhf],
          qemu-system-arm [arm64 armhf] | qemu-system-x86 [amd64 i386] | qemu-system,
          udev
-Restrictions: allow-stderr, needs-root, flaky
-Architecture: amd64 i386
+Restrictions: allow-stderr, needs-root
+Architecture: amd64
 
 # Dummy test so that kernel updates trigger our other autopkgtests on debci
 Features: test-name=hint-testsuite-triggers
