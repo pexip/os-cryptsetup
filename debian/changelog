@@ -1,4 +1,4 @@
-cryptsetup (2:2.7.5-2+pexip24u1) pexip-trixie; urgency=medium
+cryptsetup (2:2.7.5-2+pexip25u1) pexip-trixie; urgency=medium
 
   * New upstream release
 
